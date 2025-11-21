@@ -1,0 +1,161 @@
+You are an expert full-stack engineer. 
+Build me a complete SaaS application in Next.js 14 (App Router) with Tailwind, Shadcn/UI, NextAuth (Google OAuth), Stripe Billing and an API integration with Claude (Anthropic). 
+The app name is **Claude Menu**.
+
+────────────────────────────────────────
+🔶 GOAL OF APPLICATION
+────────────────────────────────────────
+Users upload a restaurant menu in PDF or Word format.  
+The system extracts the text content from the file, combines it with user-provided visual settings and style prompt, then generates **3 different fully styled HTML menu designs** using Claude API.  
+User chooses one design and downloads it.
+
+────────────────────────────────────────
+🔶 CORE FEATURES
+────────────────────────────────────────
+
+1. **Google authentication**
+   - Implement NextAuth with Google provider
+   - Only authenticated users can use the generator
+
+2. **Stripe subscription**
+   - Stripe Checkout
+   - Subscription required before menu generation
+   - Show "Upgrade plan" CTA if user has no active subscription
+
+3. **File upload**
+   - User can drag-and-drop or select a file (PDF or DOCX)
+   - Use a file parsing library:
+     - PDF: pdf-parse or similar
+     - DOCX: docx / mammoth / docx-parser
+
+4. **Text extraction**
+   - Read the file on the server
+   - Extract plain text
+   - Return extracted text to user preview
+
+5. **User settings inputs**
+   UI must include:
+   - Color palette picker (3–4 colors)
+   - Size selection dropdown (A4, Letter, Square, Web Page, Tall Poster)
+   - Prompt textarea (“Describe how the menu should look”)
+
+6. **Claude prompt builder**
+   The backend should generate a structured prompt:
+   - extracted menu text
+   - selected colors
+   - selected size
+   - user prompt
+   - instructions to generate HTML
+
+   Format:
+   {
+     "version": "1",
+     "menu_text": "...",
+     "colors": [...],
+     "size": "...",
+     "style_prompt": "...",
+   }
+
+   Send to Claude 3.5 Sonnet model.
+
+7. **Generate 3 HTML outputs simultaneously**
+   - For each output: send variation parameter in the prompt
+   - Return array of 3 different styled HTML menus
+
+8. **Preview and download**
+   - Display 3 rendered HTML designs in a grid
+   - Add "Select this design"
+   - On select → show download button
+   - Allow user to:
+     - Download HTML file
+     - Download PDF (convert HTML → PDF using a server-side tool like `puppeteer`)
+
+────────────────────────────────────────
+🔶 STACK REQUIREMENTS
+────────────────────────────────────────
+
+Use:
+- Next.js 14 App Router
+- TailwindCSS
+- Shadcn/UI for components
+- NextAuth for Google OAuth
+- Stripe Billing (subscriptions)
+- Prisma + PostgreSQL (downloaded from `Neon` or local)
+- API Route Handlers for backend logic
+- Server Actions where helpful
+- File upload using Next.js API endpoints
+- Claude API integration (`claude-3-5-sonnet-latest`)
+- Puppeteer for HTML→PDF export
+
+────────────────────────────────────────
+🔶 PAGES TO IMPLEMENT
+────────────────────────────────────────
+/              — landing page
+/login         — Google OAuth handled automatically
+/dashboard     — authenticated area
+/generate      — main menu generator (protected page)
+    - file upload
+    - text extraction preview
+    - settings: colors, size, prompt
+    - generate button
+/generate/result
+    - show 3 HTML menu designs
+    - allow selecting one + download
+/settings/billing — Stripe portal
+/api/* — all API routes
+
+────────────────────────────────────────
+🔶 API ROUTES
+────────────────────────────────────────
+/api/auth/[...nextauth]
+/api/stripe/create-checkout-session
+/api/stripe/webhook
+/api/upload
+/api/extract-text
+/api/ai/generate
+/api/ai/download-pdf
+
+Each API route must include working code.
+
+────────────────────────────────────────
+🔶 UI REQUIREMENTS
+────────────────────────────────────────
+Use:
+- Tailwind + Shadcn UI components
+- Beautiful minimal SaaS aesthetic (Vercel-like)
+- Drag & drop upload area
+- Color palette picker
+- Three-column preview layout for variations
+- Skeleton loaders during generation
+- Toast messages for errors
+
+────────────────────────────────────────
+🔶 IMPLEMENTATION FORMAT
+────────────────────────────────────────
+Please generate the full project with:
+
+1. All required files and directories
+2. Next.js routing fully implemented
+3. Functional file upload & parsing
+4. Working Claude API integration
+5. Working Stripe subscription flow
+6. UI fully implemented
+7. Clear instructions in README.md:
+   - environment variables
+   - how to run dev mode
+   - how to deploy
+   - how to configure Google OAuth
+   - how to configure Stripe
+
+────────────────────────────────────────
+🔶 PROJECT MUST BE READY TO RUN
+────────────────────────────────────────
+The result must be:
+- runnable in Replit
+- runnable locally with `npm install && npm run dev`
+- production deploy-ready
+
+────────────────────────────────────────
+Now generate ALL necessary code files and structure.  
+DO NOT summarize — produce the entire full project.  
+If the system truncates, continue printing until the full project is complete.
