@@ -29,6 +29,10 @@ The application is fully implemented with:
 - ✅ Added development subscription bypass with production security guard
 - ✅ Fixed subscription status persistence to be immediate in development mode
 - ✅ Added startup validation to prevent bypass in non-development environments
+- ✅ **Made menu generation FREE for everyone**
+- ✅ **Moved subscription requirement to downloads only**
+- ✅ **Added SUBSCRIPTION_REQUIRED flag for fully optional subscription system**
+- ✅ **Subscription can now be completely disabled for free deployments**
 
 ## Project Architecture
 
@@ -93,24 +97,42 @@ Optional (recommended for production):
 
 Development environment variables (configured for testing):
 - `ENABLE_DEV_SUBSCRIPTION_BYPASS` - Set to "true" in development to enable subscription bypass
+- `SUBSCRIPTION_REQUIRED` - Set to "false" to disable subscription features entirely (default: "true")
 
-**Development Mode:** With `ENABLE_DEV_SUBSCRIPTION_BYPASS=true` and no `STRIPE_WEBHOOK_SECRET`, subscription creation immediately sets `subscriptionStatus='active'` for testing without webhook dependency. This bypass:
-- Requires all three conditions: ENABLE_DEV_SUBSCRIPTION_BYPASS=true + NODE_ENV=development + No STRIPE_WEBHOOK_SECRET
+**Subscription Modes:**
+
+1. **Subscription Required (default)**: `SUBSCRIPTION_REQUIRED=true` or not set
+   - Users can generate menus for FREE
+   - Subscription required only for DOWNLOADING designs
+   - With `ENABLE_DEV_SUBSCRIPTION_BYPASS=true` and no `STRIPE_WEBHOOK_SECRET`, subscription creation immediately sets `subscriptionStatus='active'` for testing
+   - In production, set `STRIPE_WEBHOOK_SECRET` for webhook signature verification
+
+2. **Subscription Optional**: `SUBSCRIPTION_REQUIRED=false`
+   - Everything is FREE - no Stripe integration needed
+   - All subscription UI is hidden
+   - Users can generate AND download without any payment
+   - Perfect for free/open-source deployments
+
+**Development Bypass (when SUBSCRIPTION_REQUIRED=true):**
+- Requires: ENABLE_DEV_SUBSCRIPTION_BYPASS=true + NODE_ENV=development + No STRIPE_WEBHOOK_SECRET
 - Server crashes at startup if enabled outside development environment
 - Logs warning message when active
 - Should NEVER be enabled in production
 
-**Production Mode:** In production, set `STRIPE_WEBHOOK_SECRET` to enable webhook signature verification. Subscriptions start with `status='incomplete'` and update to `'active'` when the webhook fires after successful payment.
+**Production Mode (when SUBSCRIPTION_REQUIRED=true):**
+- Set `STRIPE_WEBHOOK_SECRET` to enable webhook signature verification
+- Subscriptions start with `status='incomplete'` and update to `'active'` when webhook fires after successful payment
 
 ## Key Features
 1. **Authentication**: Seamless login with Replit Auth supporting multiple providers
-2. **Subscription Gating**: Users must subscribe to generate menus
-3. **File Upload**: Drag-and-drop interface for PDF and DOCX files
-4. **Text Extraction**: Automatic extraction of menu content
-5. **AI Generation**: Claude generates 3 unique professional HTML designs
-6. **Customization**: Color palette picker, size selection, style prompts
-7. **Download**: Export selected designs as standalone HTML files
-8. **Dashboard**: View generation history and subscription status
+2. **Free Generation**: Users can generate menu designs for FREE
+3. **Optional Subscription**: Subscribe only if you want to download designs (configurable)
+4. **File Upload**: Drag-and-drop interface for PDF and DOCX files
+5. **Text Extraction**: Automatic extraction of menu content
+6. **AI Generation**: Claude generates 3 unique professional HTML designs
+7. **Customization**: Color palette picker, size selection, style prompts
+8. **Download**: Export selected designs as standalone HTML files (subscription-gated if enabled)
+9. **Dashboard**: View generation history and subscription status
 
 ## Technical Decisions
 - **Replit Auth over Google OAuth**: Provides multi-provider support with easier setup

@@ -44,17 +44,7 @@ export default function Generate() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: subscription, refetch: refetchSubscription } = useQuery<{ hasActiveSubscription: boolean; isDevelopmentBypass?: boolean }>({
-    queryKey: ["/api/subscription/status"],
-    enabled: isAuthenticated,
-  });
-
-  // Refetch subscription status when page loads to ensure fresh data
-  useEffect(() => {
-    if (isAuthenticated) {
-      refetchSubscription();
-    }
-  }, [isAuthenticated, refetchSubscription]);
+  // Generation is now free - no subscription check needed
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -161,27 +151,6 @@ export default function Generate() {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
-  const hasActiveSubscription = subscription?.hasActiveSubscription ?? false;
-
-  if (!hasActiveSubscription) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <Card className="max-w-lg p-8 text-center">
-          <Sparkles className="h-16 w-16 text-primary mx-auto mb-4" />
-          <h2 className="text-2xl font-semibold mb-2">Subscription Required</h2>
-          <p className="text-muted-foreground mb-6">
-            Subscribe to start generating beautiful menu designs with AI
-          </p>
-          <Link href="/subscribe">
-            <Button size="lg" data-testid="button-subscribe-required">
-              Subscribe Now
-            </Button>
-          </Link>
-        </Card>
       </div>
     );
   }

@@ -33,7 +33,7 @@ export default function Dashboard() {
     enabled: isAuthenticated,
   });
 
-  const { data: subscription, refetch: refetchSubscription } = useQuery<{ hasActiveSubscription: boolean; isDevelopmentBypass?: boolean }>({
+  const { data: subscription, refetch: refetchSubscription } = useQuery<{ hasActiveSubscription: boolean; isDevelopmentBypass?: boolean; subscriptionRequired: boolean }>({
     queryKey: ["/api/subscription/status"],
     enabled: isAuthenticated,
   });
@@ -44,6 +44,8 @@ export default function Dashboard() {
       refetchSubscription();
     }
   }, [isAuthenticated, refetchSubscription]);
+
+  const subscriptionRequired = subscription?.subscriptionRequired ?? true;
 
   if (isLoading || !user) {
     return (
@@ -124,19 +126,16 @@ export default function Dashboard() {
               <div className="flex items-center justify-between">
                 <div>
                   <span className="text-sm text-muted-foreground block mb-2">Quick Action</span>
-                  {hasActiveSubscription ? (
-                    <Link href="/generate">
-                      <Button data-testid="button-new-menu">
-                        <Plus className="h-4 w-4 mr-2" />
-                        New Menu
-                      </Button>
-                    </Link>
-                  ) : (
-                    <Link href="/subscribe">
-                      <Button variant="default" data-testid="button-upgrade">
-                        Upgrade Plan
-                      </Button>
-                    </Link>
+                  <Link href="/generate">
+                    <Button data-testid="button-new-menu">
+                      <Plus className="h-4 w-4 mr-2" />
+                      New Menu
+                    </Button>
+                  </Link>
+                  {subscriptionRequired && !hasActiveSubscription && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Subscribe to download designs
+                    </p>
                   )}
                 </div>
               </div>
@@ -150,14 +149,12 @@ export default function Dashboard() {
             <h2 className="text-2xl font-semibold" data-testid="text-recent-title">
               Recent Generations
             </h2>
-            {hasActiveSubscription && (
-              <Link href="/generate">
-                <Button data-testid="button-create-new">
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create New
-                </Button>
-              </Link>
-            )}
+            <Link href="/generate">
+              <Button data-testid="button-create-new">
+                <Plus className="h-4 w-4 mr-2" />
+                Create New
+              </Button>
+            </Link>
           </div>
 
           {generationsLoading ? (
@@ -171,23 +168,17 @@ export default function Dashboard() {
                 No menus generated yet
               </h3>
               <p className="text-muted-foreground mb-6">
-                {hasActiveSubscription 
-                  ? "Create your first beautiful menu design"
-                  : "Subscribe to start generating beautiful menu designs"
-                }
+                Create your first beautiful menu design for free
               </p>
-              {hasActiveSubscription ? (
-                <Link href="/generate">
-                  <Button data-testid="button-generate-first">
-                    Generate Your First Menu
-                  </Button>
-                </Link>
-              ) : (
-                <Link href="/subscribe">
-                  <Button data-testid="button-subscribe-now">
-                    Subscribe Now
-                  </Button>
-                </Link>
+              <Link href="/generate">
+                <Button data-testid="button-generate-first">
+                  Generate Your First Menu
+                </Button>
+              </Link>
+              {subscriptionRequired && !hasActiveSubscription && (
+                <p className="text-xs text-muted-foreground mt-4">
+                  Note: Subscription required to download final designs
+                </p>
               )}
             </Card>
           ) : (

@@ -62,8 +62,19 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
 
+// Check if subscription feature is required
+function isSubscriptionRequired(): boolean {
+  return process.env.SUBSCRIPTION_REQUIRED !== 'false';
+}
+
 // Helper to check if user has active subscription (with development bypass support)
 async function ensureActiveSubscription(userId: string): Promise<{ hasAccess: boolean; user: any }> {
+  // If subscription is not required, grant access to everyone without checking user status
+  if (!isSubscriptionRequired()) {
+    const user = await storage.getUser(userId);
+    return { hasAccess: true, user };
+  }
+  
   let user = await storage.getUser(userId);
   
   if (!user) {
@@ -126,6 +137,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // App config route
+  app.get('/api/config', async (_req, res) => {
+    res.json({
+      subscriptionRequired: isSubscriptionRequired(),
+    });
+  });
+
   // Subscription status route
   app.get('/api/subscription/status', isAuthenticated, async (req: any, res) => {
     try {
@@ -136,7 +154,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isDevMode = process.env.NODE_ENV === 'development';
       const isDevelopmentBypass = enableDevBypass && isDevMode && !process.env.STRIPE_WEBHOOK_SECRET;
       
-      res.json({ hasActiveSubscription: hasAccess, isDevelopmentBypass });
+      res.json({ 
+        hasActiveSubscription: hasAccess, 
+        isDevelopmentBypass,
+        subscriptionRequired: isSubscriptionRequired()
+      });
     } catch (error) {
       console.error("Error checking subscription:", error);
       res.status(500).json({ message: "Failed to check subscription status" });
@@ -360,14 +382,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Generate menu designs route
+  // Generate menu designs route (now free for everyone)
   app.post('/api/generate', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const { hasAccess } = await ensureActiveSubscription(userId);
+      const user = await storage.getUser(userId);
 
-      if (!hasAccess) {
-        return res.status(403).json({ message: "Active subscription required" });
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
       }
 
       const { fileName, extractedText, colors, size, stylePrompt } = req.body;
@@ -459,10 +481,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Download HTML
+  // Download HTML (requires subscription if SUBSCRIPTION_REQUIRED=true)
   app.get('/api/generations/:id/download/:variation', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
+      
+      // Check subscription if required
+      if (isSubscriptionRequired()) {
+        const { hasAccess } = await ensureActiveSubscription(userId);
+        if (!hasAccess) {
+          return res.status(403).json({ message: "Active subscription required to download designs" });
+        }
+      }
+      
       const generation = await storage.getMenuGeneration(req.params.id);
 
       if (!generation) {

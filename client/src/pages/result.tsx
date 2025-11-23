@@ -36,6 +36,15 @@ export default function Result() {
     enabled: !!generationId && isAuthenticated,
   });
 
+  const { data: subscription } = useQuery<{ hasActiveSubscription: boolean; subscriptionRequired: boolean }>({
+    queryKey: ["/api/subscription/status"],
+    enabled: isAuthenticated,
+  });
+
+  const subscriptionRequired = subscription?.subscriptionRequired ?? true;
+  const hasActiveSubscription = subscription?.hasActiveSubscription ?? false;
+  const canDownload = !subscriptionRequired || hasActiveSubscription;
+
   useEffect(() => {
     if (generation?.selectedVariation !== null && generation?.selectedVariation !== undefined) {
       setSelectedVariation(generation.selectedVariation);
@@ -199,28 +208,41 @@ export default function Result() {
                       <Check className="h-5 w-5 text-primary" data-testid={`icon-selected-${index}`} />
                     )}
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex flex-col gap-2">
                     {selectedVariation === index ? (
                       <>
-                        <Button
-                          variant="default"
-                          className="flex-1"
-                          onClick={() => downloadMutation.mutate(index)}
-                          disabled={downloadMutation.isPending}
-                          data-testid={`button-download-${index}`}
-                        >
-                          {downloadMutation.isPending ? (
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          ) : (
-                            <Download className="h-4 w-4 mr-2" />
-                          )}
-                          Download HTML
-                        </Button>
+                        {canDownload ? (
+                          <Button
+                            variant="default"
+                            className="w-full"
+                            onClick={() => downloadMutation.mutate(index)}
+                            disabled={downloadMutation.isPending}
+                            data-testid={`button-download-${index}`}
+                          >
+                            {downloadMutation.isPending ? (
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4 mr-2" />
+                            )}
+                            Download HTML
+                          </Button>
+                        ) : (
+                          <Link href="/subscribe" className="w-full">
+                            <Button
+                              variant="default"
+                              className="w-full"
+                              data-testid={`button-subscribe-to-download-${index}`}
+                            >
+                              <Sparkles className="h-4 w-4 mr-2" />
+                              Subscribe to Download
+                            </Button>
+                          </Link>
+                        )}
                       </>
                     ) : (
                       <Button
                         variant="outline"
-                        className="flex-1"
+                        className="w-full"
                         onClick={() => selectMutation.mutate(index)}
                         disabled={selectMutation.isPending}
                         data-testid={`button-select-${index}`}
