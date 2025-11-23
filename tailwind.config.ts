@@ -83,9 +83,12 @@ export default {
         },
       },
       fontFamily: {
-        sans: ["var(--font-sans)"],
+        sans: ["Inter", "var(--font-sans)"],
         serif: ["var(--font-serif)"],
         mono: ["var(--font-mono)"],
+      },
+      fontSize: {
+        '7xl': ['4.5rem', { lineHeight: '1', letterSpacing: '-0.02em' }],
       },
       keyframes: {
         "accordion-down": {
