@@ -33,10 +33,17 @@ export default function Dashboard() {
     enabled: isAuthenticated,
   });
 
-  const { data: subscription } = useQuery<{ hasActiveSubscription: boolean }>({
+  const { data: subscription, refetch: refetchSubscription } = useQuery<{ hasActiveSubscription: boolean; isDevelopmentBypass?: boolean }>({
     queryKey: ["/api/subscription/status"],
     enabled: isAuthenticated,
   });
+
+  // Refetch subscription status when component mounts to ensure fresh data
+  useEffect(() => {
+    if (isAuthenticated) {
+      refetchSubscription();
+    }
+  }, [isAuthenticated, refetchSubscription]);
 
   if (isLoading || !user) {
     return (

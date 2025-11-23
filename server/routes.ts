@@ -23,6 +23,31 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2023-10-16",
 });
 
+// Create or retrieve the subscription price
+// In production, this should be a configured price ID
+const CLAUDE_MENU_PRO_PRICE_ID = process.env.STRIPE_PRICE_ID || null;
+async function getSubscriptionPrice(): Promise<string> {
+  // Use configured price if available
+  if (CLAUDE_MENU_PRO_PRICE_ID) {
+    return CLAUDE_MENU_PRO_PRICE_ID;
+  }
+  
+  // Otherwise create price on the fly (for development)
+  const price = await stripe.prices.create({
+    currency: 'usd',
+    unit_amount: 2900, // $29.00
+    recurring: {
+      interval: 'month',
+    },
+    product_data: {
+      name: 'Claude Menu Pro',
+      description: 'Unlimited menu generations with AI',
+    },
+  });
+  
+  return price.id;
+}
+
 // Initialize Anthropic
 if (!process.env.ANTHROPIC_API_KEY) {
   throw new Error('Missing required Anthropic API key: ANTHROPIC_API_KEY');
@@ -37,9 +62,54 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
 
+// Helper to check if user has active subscription (with development bypass support)
+async function ensureActiveSubscription(userId: string): Promise<{ hasAccess: boolean; user: any }> {
+  let user = await storage.getUser(userId);
+  
+  if (!user) {
+    return { hasAccess: false, user: null };
+  }
+  
+  // Check if development bypass should apply
+  const enableDevBypass = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
+  const isDevMode = process.env.NODE_ENV === 'development';
+  const isDevelopmentBypass = enableDevBypass && isDevMode && !process.env.STRIPE_WEBHOOK_SECRET;
+  
+  // If bypass applies and user has subscription, ensure status is active
+  if (isDevelopmentBypass && user.stripeSubscriptionId && user.subscriptionStatus !== 'active') {
+    console.log(`Development bypass: Activating subscription for user ${userId}`);
+    await storage.updateUserStripeInfo(
+      userId,
+      user.stripeCustomerId || '',
+      user.stripeSubscriptionId,
+      'active'
+    );
+    user = await storage.getUser(userId); // Refetch
+  }
+  
+  return {
+    hasAccess: user.subscriptionStatus === 'active',
+    user
+  };
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Stripe webhook needs to come before JSON middleware
-  // It's already registered in app.ts with rawBody support
+  // Critical: Production environment guard for development bypass
+  // This prevents accidental security bypass in production or staging environments
+  const nodeEnv = process.env.NODE_ENV || 'production';
+  const bypassEnabled = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
+  
+  if (bypassEnabled && nodeEnv !== 'development') {
+    throw new Error(
+      `CRITICAL SECURITY ERROR: ENABLE_DEV_SUBSCRIPTION_BYPASS is enabled but NODE_ENV is "${nodeEnv}". ` +
+      `This bypass must ONLY be enabled in development environments. ` +
+      `Set ENABLE_DEV_SUBSCRIPTION_BYPASS=false or change NODE_ENV to "development".`
+    );
+  }
+  
+  if (bypassEnabled) {
+    console.warn('⚠️  Development subscription bypass is ENABLED. This should NEVER be used in production!');
+  }
   
   // Auth middleware
   await setupAuth(app);
@@ -60,11 +130,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/subscription/status', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
+      const { hasAccess } = await ensureActiveSubscription(userId);
       
-      const hasActiveSubscription = user?.subscriptionStatus === 'active';
+      const enableDevBypass = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
+      const isDevMode = process.env.NODE_ENV === 'development';
+      const isDevelopmentBypass = enableDevBypass && isDevMode && !process.env.STRIPE_WEBHOOK_SECRET;
       
-      res.json({ hasActiveSubscription });
+      res.json({ hasActiveSubscription: hasAccess, isDevelopmentBypass });
     } catch (error) {
       console.error("Error checking subscription:", error);
       res.status(500).json({ message: "Failed to check subscription status" });
@@ -106,24 +178,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customerId = customer.id;
       }
 
-      // Create a price for the subscription
-      const price = await stripe.prices.create({
-        currency: 'usd',
-        unit_amount: 2900, // $29.00
-        recurring: {
-          interval: 'month',
-        },
-        product_data: {
-          name: 'Claude Menu Pro',
-          description: 'Unlimited menu generations with AI',
-        },
-      });
+      // Get or create subscription price
+      const priceId = await getSubscriptionPrice();
 
       // Create subscription
       const subscription = await stripe.subscriptions.create({
         customer: customerId,
         items: [{
-          price: price.id,
+          price: priceId,
         }],
         payment_behavior: 'default_incomplete',
         payment_settings: {
@@ -132,12 +194,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         expand: ['latest_invoice.payment_intent'],
       });
 
+      // Determine initial subscription status
+      // In development with bypass enabled, set to 'active' immediately for testing
+      // Otherwise, use Stripe's status (typically 'incomplete' until webhook confirms payment)
+      const enableDevBypass = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
+      const isDevMode = process.env.NODE_ENV === 'development';
+      const isDevelopmentBypass = enableDevBypass && isDevMode && !process.env.STRIPE_WEBHOOK_SECRET;
+      
+      const initialStatus = isDevelopmentBypass ? 'active' : subscription.status;
+      
+      if (isDevelopmentBypass) {
+        console.log(`Development bypass: Creating subscription with immediate 'active' status for user ${userId}`);
+      }
+      
       // Update user with Stripe info
       await storage.updateUserStripeInfo(
         userId,
         customerId,
         subscription.id,
-        subscription.status
+        initialStatus
       );
 
       const invoice = subscription.latest_invoice as Stripe.Invoice;
@@ -159,8 +234,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Stripe webhook to handle subscription status updates
   app.post('/api/webhook/stripe', async (req, res) => {
-    const sig = req.headers['stripe-signature'];
+    // Webhook secret is required for signature verification in production
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+    if (!webhookSecret) {
+      // In development, log and return success to avoid blocking Stripe testing
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('STRIPE_WEBHOOK_SECRET not configured in development - webhook received but not processed');
+        return res.status(200).json({ received: true, processed: false, reason: 'dev_mode_no_secret' });
+      }
+      // In production, this is a configuration error
+      console.error('STRIPE_WEBHOOK_SECRET not configured - webhook cannot be processed');
+      return res.status(500).send('Webhook secret not configured');
+    }
     
+    const sig = req.headers['stripe-signature'];
     if (!sig) {
       return res.status(400).send('Missing stripe signature');
     }
@@ -173,7 +260,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       event = stripe.webhooks.constructEvent(
         rawBody,
         sig,
-        process.env.STRIPE_WEBHOOK_SECRET || ''
+        webhookSecret
       );
     } catch (err: any) {
       console.error('Webhook signature verification failed:', err.message);
@@ -277,14 +364,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/generate', isAuthenticated, async (req: any, res) => {
     try {
       const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
+      const { hasAccess } = await ensureActiveSubscription(userId);
 
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
-      }
-
-      // Check subscription
-      if (user.subscriptionStatus !== 'active') {
+      if (!hasAccess) {
         return res.status(403).json({ message: "Active subscription required" });
       }
 

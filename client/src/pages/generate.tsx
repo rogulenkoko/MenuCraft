@@ -44,10 +44,17 @@ export default function Generate() {
     }
   }, [isAuthenticated, authLoading, toast]);
 
-  const { data: subscription } = useQuery<{ hasActiveSubscription: boolean }>({
+  const { data: subscription, refetch: refetchSubscription } = useQuery<{ hasActiveSubscription: boolean; isDevelopmentBypass?: boolean }>({
     queryKey: ["/api/subscription/status"],
     enabled: isAuthenticated,
   });
+
+  // Refetch subscription status when page loads to ensure fresh data
+  useEffect(() => {
+    if (isAuthenticated) {
+      refetchSubscription();
+    }
+  }, [isAuthenticated, refetchSubscription]);
 
   const uploadMutation = useMutation({
     mutationFn: async (file: File) => {

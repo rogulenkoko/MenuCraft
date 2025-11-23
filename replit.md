@@ -83,6 +83,15 @@ Required secrets (already configured):
 - `STRIPE_SECRET_KEY` - Stripe secret key
 - `VITE_STRIPE_PUBLIC_KEY` - Stripe publishable key
 
+Optional (recommended for production):
+- `STRIPE_WEBHOOK_SECRET` - Required for Stripe webhook signature verification in production
+- `STRIPE_PRICE_ID` - Reusable Stripe price ID (otherwise created on-the-fly)
+
+Development environment variables (configured for testing):
+- `ENABLE_DEV_SUBSCRIPTION_BYPASS` - Set to "true" in development to enable subscription bypass
+
+**Development Mode:** With `ENABLE_DEV_SUBSCRIPTION_BYPASS=true` and no `STRIPE_WEBHOOK_SECRET`, users with a stripeSubscriptionId are considered to have an active subscription for testing purposes. This bypass is ONLY active in development mode (`NODE_ENV=development`) and should NEVER be enabled in production.
+
 ## Key Features
 1. **Authentication**: Seamless login with Replit Auth supporting multiple providers
 2. **Subscription Gating**: Users must subscribe to generate menus

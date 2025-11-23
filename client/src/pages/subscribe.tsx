@@ -3,12 +3,12 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { loadStripe } from '@stripe/stripe-js';
-import { apiRequest } from "@/lib/queryClient";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Sparkles, Check, LogOut, Loader2 } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 
 if (!import.meta.env.VITE_STRIPE_PUBLIC_KEY) {
   throw new Error('Missing required Stripe key: VITE_STRIPE_PUBLIC_KEY');
@@ -20,6 +20,7 @@ function SubscribeForm() {
   const elements = useElements();
   const { toast } = useToast();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [, setLocation] = useLocation();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -33,7 +34,7 @@ function SubscribeForm() {
     const { error } = await stripe.confirmPayment({
       elements,
       confirmParams: {
-        return_url: window.location.origin,
+        return_url: window.location.origin + "/dashboard",
       },
     });
 
@@ -46,10 +47,19 @@ function SubscribeForm() {
         variant: "destructive",
       });
     } else {
+      // Invalidate subscription status to reflect new state
+      await queryClient.invalidateQueries({ queryKey: ["/api/subscription/status"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
+      
       toast({
         title: "Payment Successful",
         description: "You are now subscribed!",
       });
+      
+      // Redirect to dashboard
+      setTimeout(() => {
+        setLocation("/dashboard");
+      }, 1000);
     }
   };
 
@@ -98,8 +108,12 @@ export default function Subscribe() {
   useEffect(() => {
     if (isAuthenticated) {
       apiRequest("POST", "/api/create-subscription")
-        .then((data) => {
+        .then(async (data) => {
           setClientSecret(data.clientSecret);
+          // Invalidate subscription status immediately after creation
+          // This ensures the development bypass works right away
+          await queryClient.invalidateQueries({ queryKey: ["/api/subscription/status"] });
+          await queryClient.refetchQueries({ queryKey: ["/api/subscription/status"] });
         })
         .catch((error) => {
           toast({
