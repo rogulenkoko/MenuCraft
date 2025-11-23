@@ -106,23 +106,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customerId = customer.id;
       }
 
+      // Create a price for the subscription
+      const price = await stripe.prices.create({
+        currency: 'usd',
+        unit_amount: 2900, // $29.00
+        recurring: {
+          interval: 'month',
+        },
+        product_data: {
+          name: 'Claude Menu Pro',
+          description: 'Unlimited menu generations with AI',
+        },
+      });
+
       // Create subscription
       const subscription = await stripe.subscriptions.create({
         customer: customerId,
         items: [{
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: 'Claude Menu Pro',
-              description: 'Unlimited menu generations with AI',
-            },
-            unit_amount: 2900, // $29.00
-            recurring: {
-              interval: 'month',
-            },
-          },
+          price: price.id,
         }],
         payment_behavior: 'default_incomplete',
+        payment_settings: {
+          save_default_payment_method: 'on_subscription',
+        },
         expand: ['latest_invoice.payment_intent'],
       });
 
