@@ -16,15 +16,19 @@ The application is fully implemented with:
 - Full user dashboard with generation history
 
 ## Recent Changes (November 23, 2024)
-- Implemented complete frontend with landing page, dashboard, generator, results, and subscription pages
-- Built backend API with Replit Auth, Stripe integration, and Claude AI
-- Set up PostgreSQL database with Drizzle ORM
-- Fixed routing using Redirect components to properly separate authenticated/unauthenticated routes
-- Fixed session cookies to work in development (secure=false in dev, sameSite=lax)
-- Added Stripe webhook handling with rawBody support for subscription status updates
-- Implemented file upload with PDF/DOCX text extraction
-- Changed AI generation to synchronous flow for immediate design availability
-- Created AI generation pipeline for 3 menu design variations
+- ✅ Implemented complete frontend with landing page, dashboard, generator, results, and subscription pages
+- ✅ Built backend API with Replit Auth, Stripe integration, and Claude AI
+- ✅ Set up PostgreSQL database with Drizzle ORM
+- ✅ Fixed routing using Redirect components to properly separate authenticated/unauthenticated routes
+- ✅ Fixed session cookies to work in development (sameSite='lax', secure=true)
+- ✅ Added Stripe webhook handling with rawBody support for subscription status updates
+- ✅ Implemented file upload with PDF/DOCX text extraction
+- ✅ Changed AI generation to synchronous flow for immediate design availability
+- ✅ Created AI generation pipeline for 3 menu design variations
+- ✅ Implemented centralized subscription checking with `ensureActiveSubscription()` helper
+- ✅ Added development subscription bypass with production security guard
+- ✅ Fixed subscription status persistence to be immediate in development mode
+- ✅ Added startup validation to prevent bypass in non-development environments
 
 ## Project Architecture
 
@@ -90,7 +94,13 @@ Optional (recommended for production):
 Development environment variables (configured for testing):
 - `ENABLE_DEV_SUBSCRIPTION_BYPASS` - Set to "true" in development to enable subscription bypass
 
-**Development Mode:** With `ENABLE_DEV_SUBSCRIPTION_BYPASS=true` and no `STRIPE_WEBHOOK_SECRET`, users with a stripeSubscriptionId are considered to have an active subscription for testing purposes. This bypass is ONLY active in development mode (`NODE_ENV=development`) and should NEVER be enabled in production.
+**Development Mode:** With `ENABLE_DEV_SUBSCRIPTION_BYPASS=true` and no `STRIPE_WEBHOOK_SECRET`, subscription creation immediately sets `subscriptionStatus='active'` for testing without webhook dependency. This bypass:
+- Requires all three conditions: ENABLE_DEV_SUBSCRIPTION_BYPASS=true + NODE_ENV=development + No STRIPE_WEBHOOK_SECRET
+- Server crashes at startup if enabled outside development environment
+- Logs warning message when active
+- Should NEVER be enabled in production
+
+**Production Mode:** In production, set `STRIPE_WEBHOOK_SECRET` to enable webhook signature verification. Subscriptions start with `status='incomplete'` and update to `'active'` when the webhook fires after successful payment.
 
 ## Key Features
 1. **Authentication**: Seamless login with Replit Auth supporting multiple providers
@@ -108,12 +118,37 @@ Development environment variables (configured for testing):
 - **Stripe Subscriptions**: Recurring billing for SaaS model
 - **Claude API**: Generates creative, high-quality HTML designs
 - **Standalone HTML**: No dependencies, ready to print or publish
-- **Background Processing**: AI generation runs asynchronously for better UX
+- **Synchronous AI Generation**: Immediate design availability for better UX
+- **Centralized Subscription Check**: Single `ensureActiveSubscription()` helper ensures consistent gating across all paywalled endpoints
+- **Development Bypass**: Enables testing without webhook configuration, with strict production safeguards
 
-## Next Phase Features (Not Yet Implemented)
-- PDF export using Puppeteer
-- Stripe customer portal for subscription management
-- Menu generation history with thumbnails
-- Design templates and presets
-- Real-time design editing
-- Team collaboration features
+## MVP Complete - Next Phase Features
+
+**Current MVP Features (Complete):**
+- ✅ User authentication with Replit Auth
+- ✅ Stripe subscription checkout and management
+- ✅ PDF/DOCX file upload and text extraction
+- ✅ AI-powered menu generation (3 variations)
+- ✅ Design preview and HTML download
+- ✅ Generation history dashboard
+- ✅ Development testing bypass with security guards
+
+**Next Phase Features (Not Yet Implemented):**
+- 📄 PDF export using Puppeteer - Convert HTML designs to printable PDFs
+- 💳 Stripe customer portal - Self-service subscription management and cancellation
+- 🎨 Design templates and presets - Pre-configured styles for common menu types
+- ✏️ Design editing capability - Modify AI-generated menus before download
+- 👥 Team collaboration features - Share and collaborate on menu designs
+
+## Security & Production Readiness
+
+**Development Testing:**
+- Set `ENABLE_DEV_SUBSCRIPTION_BYPASS=true` to bypass webhook requirement
+- Server validates environment at startup and crashes if misconfigured
+- All protected routes use centralized `ensureActiveSubscription()` helper
+
+**Production Deployment:**
+- Must set `STRIPE_WEBHOOK_SECRET` for webhook signature verification
+- Must NOT set `ENABLE_DEV_SUBSCRIPTION_BYPASS` (server will crash if enabled)
+- Webhook updates subscription status to 'active' after payment
+- All routes consistently enforce subscription status
