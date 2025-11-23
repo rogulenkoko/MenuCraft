@@ -417,7 +417,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ id: generation.id });
     } catch (error: any) {
       console.error("Error creating generation:", error);
-      res.status(500).json({ message: "Failed to create generation: " + error.message });
+      
+      // Provide user-friendly error message instead of raw API errors
+      let userMessage = "We encountered an issue generating your menu designs. Please try again later.";
+      
+      // Check if it's an Anthropic API error about credits
+      if (error.message && error.message.includes("credit balance")) {
+        userMessage = "Menu generation is temporarily unavailable. Please try again in a few moments.";
+      }
+      
+      res.status(500).json({ message: userMessage });
     }
   });
 
