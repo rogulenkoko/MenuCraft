@@ -5,13 +5,15 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, Upload, FileText, LogOut, Loader2, X } from "lucide-react";
+import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useDropzone } from "react-dropzone";
 import { HexColorPicker } from "react-colorful";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { apiRequest } from "@/lib/queryClient";
 
 const DEFAULT_COLORS = ["#1e40af", "#dc2626", "#16a34a", "#eab308"];
 const MENU_SIZES = ["a4", "letter", "a5", "half-letter"] as const;
@@ -21,8 +23,10 @@ export default function Generate() {
   const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
   const [, setLocation] = useLocation();
 
+  const [inputMethod, setInputMethod] = useState<"file" | "text">("file");
   const [file, setFile] = useState<File | null>(null);
   const [extractedText, setExtractedText] = useState("");
+  const [manualText, setManualText] = useState("");
   const [colors, setColors] = useState<string[]>(DEFAULT_COLORS);
   const [customColorIndex, setCustomColorIndex] = useState<number | null>(null);
   const [size, setSize] = useState("a4");
@@ -51,16 +55,55 @@ export default function Generate() {
   };
 
   const extractTextFromFile = async (file: File): Promise<string> => {
-    if (!isSupabaseConfigured || !supabase) {
-      throw new Error('Supabase not configured');
+    const fileName = file.name.toLowerCase();
+    
+    if (fileName.endsWith('.txt')) {
+      return await file.text();
     }
-
-    const { data, error } = await supabase.functions.invoke('extract-text', {
-      body: { file },
-    });
-
-    if (error) throw error;
-    return data.text;
+    
+    if (fileName.endsWith('.pdf')) {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      try {
+        const response = await fetch('/api/extract-text', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to extract text from PDF');
+        }
+        
+        const data = await response.json();
+        return data.text;
+      } catch (error) {
+        throw new Error('Could not extract text from PDF. Please try pasting the text directly.');
+      }
+    }
+    
+    if (fileName.endsWith('.docx')) {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      try {
+        const response = await fetch('/api/extract-text', {
+          method: 'POST',
+          body: formData,
+        });
+        
+        if (!response.ok) {
+          throw new Error('Failed to extract text from DOCX');
+        }
+        
+        const data = await response.json();
+        return data.text;
+      } catch (error) {
+        throw new Error('Could not extract text from DOCX. Please try pasting the text directly.');
+      }
+    }
+    
+    throw new Error('Unsupported file type. Please use PDF, DOCX, or TXT files, or paste your menu text directly.');
   };
 
   const onDrop = async (acceptedFiles: File[]) => {
@@ -79,7 +122,7 @@ export default function Generate() {
       } catch (error: any) {
         toast({
           title: "Upload Failed",
-          description: error.message || "Failed to extract text from file",
+          description: error.message || "Failed to extract text from file. Try pasting the text directly.",
           variant: "destructive",
         });
         setFile(null);
@@ -105,11 +148,19 @@ export default function Generate() {
     setColors(newColors);
   };
 
+  const getMenuText = () => {
+    return inputMethod === "file" ? extractedText : manualText;
+  };
+
   const handleGenerate = async () => {
-    if (!extractedText) {
+    const menuText = getMenuText();
+    
+    if (!menuText.trim()) {
       toast({
         title: "No Content",
-        description: "Please upload a menu file first",
+        description: inputMethod === "file" 
+          ? "Please upload a menu file first" 
+          : "Please enter your menu text",
         variant: "destructive",
       });
       return;
@@ -139,8 +190,8 @@ export default function Generate() {
         .from('menu_generations')
         .insert({
           user_id: user.id,
-          file_name: file?.name || "menu.pdf",
-          extracted_text: extractedText,
+          file_name: file?.name || "menu.txt",
+          extracted_text: menuText,
           colors,
           size,
           style_prompt: stylePrompt,
@@ -150,17 +201,24 @@ export default function Generate() {
 
       if (insertError) throw insertError;
 
-      const { error: aiError } = await supabase.functions.invoke('generate-menu', {
-        body: {
-          generationId: generation.id,
-          menuText: extractedText,
-          colors,
-          size,
-          stylePrompt,
-        },
+      const response = await apiRequest('POST', '/api/generate', {
+        generationId: generation.id,
+        menuText,
+        colors,
+        size,
+        stylePrompt,
       });
 
-      if (aiError) throw aiError;
+      if (response.htmlVariations) {
+        const { error: updateError } = await supabase
+          .from('menu_generations')
+          .update({ html_variations: response.htmlVariations })
+          .eq('id', generation.id);
+
+        if (updateError) {
+          console.error('Error saving designs:', updateError);
+        }
+      }
 
       toast({
         title: "Success",
@@ -206,6 +264,7 @@ export default function Generate() {
 
   const userName = profile?.name || user.user_metadata?.full_name || user.email;
   const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
+  const menuText = getMenuText();
 
   return (
     <div className="min-h-screen bg-background">
@@ -256,63 +315,113 @@ export default function Generate() {
             Generate Menu Design
           </h1>
           <p className="text-muted-foreground text-lg">
-            Upload your menu and customize the design options
+            Upload your menu or paste your menu text, then customize the design
           </p>
         </div>
 
         <div className="space-y-8">
           <Card className="p-6">
-            <h2 className="text-xl font-medium mb-4">1. Upload Your Menu</h2>
-            <div
-              {...getRootProps()}
-              className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-                isDragActive ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-primary/50"
-              }`}
-              data-testid="dropzone-file-upload"
-            >
-              <input {...getInputProps()} />
-              {isUploading ? (
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="h-12 w-12 text-primary animate-spin" />
-                  <p className="text-muted-foreground">Extracting text...</p>
+            <h2 className="text-xl font-medium mb-4">1. Add Your Menu Content</h2>
+            
+            <Tabs value={inputMethod} onValueChange={(v) => setInputMethod(v as "file" | "text")} className="w-full">
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="file" data-testid="tab-file-upload">
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload File
+                </TabsTrigger>
+                <TabsTrigger value="text" data-testid="tab-paste-text">
+                  <Type className="h-4 w-4 mr-2" />
+                  Paste Text
+                </TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="file">
+                <div
+                  {...getRootProps()}
+                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                    isDragActive ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-primary/50"
+                  }`}
+                  data-testid="dropzone-file-upload"
+                >
+                  <input {...getInputProps()} />
+                  {isUploading ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="h-12 w-12 text-primary animate-spin" />
+                      <p className="text-muted-foreground">Extracting text...</p>
+                    </div>
+                  ) : file ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <FileText className="h-12 w-12 text-primary" />
+                      <p className="font-medium">{file.name}</p>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setFile(null);
+                          setExtractedText("");
+                        }}
+                        data-testid="button-remove-file"
+                      >
+                        <X className="h-4 w-4 mr-1" />
+                        Remove
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center gap-2">
+                      <Upload className="h-12 w-12 text-muted-foreground" />
+                      <p className="text-muted-foreground">
+                        {isDragActive ? "Drop your file here" : "Drag & drop your menu file, or click to browse"}
+                      </p>
+                      <p className="text-sm text-muted-foreground">Supports PDF, DOCX, and TXT files</p>
+                    </div>
+                  )}
                 </div>
-              ) : file ? (
-                <div className="flex flex-col items-center gap-2">
-                  <FileText className="h-12 w-12 text-primary" />
-                  <p className="font-medium">{file.name}</p>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setFile(null);
-                      setExtractedText("");
-                    }}
-                  >
-                    <X className="h-4 w-4 mr-1" />
-                    Remove
-                  </Button>
-                </div>
-              ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <Upload className="h-12 w-12 text-muted-foreground" />
-                  <p className="text-muted-foreground">
-                    {isDragActive ? "Drop your file here" : "Drag & drop your menu file, or click to browse"}
+                {extractedText && (
+                  <div className="mt-4">
+                    <Label>Extracted Text Preview</Label>
+                    <div className="mt-2 p-4 bg-muted rounded-lg max-h-32 overflow-y-auto">
+                      <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-4">
+                        {extractedText.substring(0, 500)}{extractedText.length > 500 ? '...' : ''}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+              
+              <TabsContent value="text">
+                <div>
+                  <Label htmlFor="menu-text">Paste your menu content below</Label>
+                  <Textarea
+                    id="menu-text"
+                    placeholder="APPETIZERS
+
+Bruschetta - $8
+Fresh tomatoes, basil, garlic on toasted bread
+
+Soup of the Day - $6
+Ask your server for today's selection
+
+MAIN COURSES
+
+Grilled Salmon - $24
+Atlantic salmon with lemon butter sauce
+
+Ribeye Steak - $32
+12oz prime cut with herb butter
+
+..."
+                    value={manualText}
+                    onChange={(e) => setManualText(e.target.value)}
+                    className="min-h-64 mt-2 font-mono text-sm"
+                    data-testid="textarea-menu-content"
+                  />
+                  <p className="text-sm text-muted-foreground mt-2">
+                    {manualText.length} characters
                   </p>
-                  <p className="text-sm text-muted-foreground">Supports PDF, DOCX, and TXT files</p>
                 </div>
-              )}
-            </div>
-            {extractedText && (
-              <div className="mt-4">
-                <Label>Extracted Text Preview</Label>
-                <div className="mt-2 p-4 bg-muted rounded-lg max-h-32 overflow-y-auto">
-                  <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-4">
-                    {extractedText.substring(0, 500)}...
-                  </p>
-                </div>
-              </div>
-            )}
+              </TabsContent>
+            </Tabs>
           </Card>
 
           <Card className="p-6">
@@ -367,7 +476,7 @@ export default function Generate() {
             size="lg"
             className="w-full text-lg py-6"
             onClick={handleGenerate}
-            disabled={!extractedText || !stylePrompt.trim() || isGenerating}
+            disabled={!menuText.trim() || !stylePrompt.trim() || isGenerating}
             data-testid="button-generate"
           >
             {isGenerating ? (

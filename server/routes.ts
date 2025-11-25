@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
+import { verifySupabaseToken } from "./supabaseAuth";
 import Stripe from "stripe";
 import Anthropic from '@anthropic-ai/sdk';
 import multer from "multer";
@@ -350,8 +351,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ received: true });
   });
 
-  // File upload route
-  app.post('/api/upload', isAuthenticated, upload.single('file'), async (req: any, res) => {
+  // File upload route (no auth required - just text extraction)
+  app.post('/api/upload', upload.single('file'), async (req: any, res) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
@@ -382,41 +383,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Generate menu designs route (now free for everyone)
-  app.post('/api/generate', isAuthenticated, async (req: any, res) => {
+  // Text extraction route (alias for /api/upload)
+  app.post('/api/extract-text', upload.single('file'), async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-
-      if (!user) {
-        return res.status(404).json({ message: "User not found" });
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
       }
 
-      const { fileName, extractedText, colors, size, stylePrompt } = req.body;
+      const file = req.file;
+      let text = "";
 
-      if (!extractedText || !colors || !size || !stylePrompt) {
+      // Extract text based on file type
+      if (file.mimetype === 'application/pdf') {
+        const pdfData = await pdfParse(file.buffer);
+        text = pdfData.text;
+      } else if (file.mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
+        const result = await mammoth.extractRawText({ buffer: file.buffer });
+        text = result.value;
+      } else if (file.mimetype === 'text/plain') {
+        text = file.buffer.toString('utf-8');
+      } else {
+        return res.status(400).json({ message: "Unsupported file type. Please upload PDF, DOCX, or TXT" });
+      }
+
+      if (!text || text.trim().length === 0) {
+        return res.status(400).json({ message: "Could not extract text from file" });
+      }
+
+      res.json({ text: text.trim() });
+    } catch (error: any) {
+      console.error("Error processing file:", error);
+      res.status(500).json({ message: "Failed to process file: " + error.message });
+    }
+  });
+
+  // Generate menu designs route - requires Supabase auth
+  // This route generates the 3 HTML variations using Claude AI
+  app.post('/api/generate', verifySupabaseToken, async (req: any, res) => {
+    try {
+      const { generationId, menuText, colors, size, stylePrompt } = req.body;
+
+      if (!menuText || !colors || !size || !stylePrompt) {
         return res.status(400).json({ message: "Missing required fields" });
       }
 
-      // Create menu generation record
-      const generation = await storage.createMenuGeneration({
-        userId,
-        fileName,
-        extractedText,
-        colors,
-        size,
-        stylePrompt,
-      });
+      console.log(`Generating menu designs for user: ${req.supabaseUser?.email || req.supabaseUser?.id}`);
 
       // Generate AI designs synchronously (takes ~30 seconds)
-      const htmlDesigns = await generateMenuDesigns(extractedText, colors, size, stylePrompt);
-      
-      // Update generation with designs
-      await storage.updateGenerationDesigns(generation.id, htmlDesigns);
+      const htmlVariations = await generateMenuDesigns(menuText, colors, size, stylePrompt);
 
-      res.json({ id: generation.id });
+      res.json({ htmlVariations, generationId });
     } catch (error: any) {
-      console.error("Error creating generation:", error);
+      console.error("Error generating designs:", error);
       
       // Provide user-friendly error message instead of raw API errors
       let userMessage = "We encountered an issue generating your menu designs. Please try again later.";
