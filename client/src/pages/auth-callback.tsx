@@ -2,10 +2,13 @@ import { useEffect, useState } from 'react';
 import { useLocation } from 'wouter';
 import { supabase, isSupabaseConfigured } from '@/lib/supabase';
 import { Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 export default function AuthCallback() {
   const [, setLocation] = useLocation();
   const [status, setStatus] = useState('Processing...');
+  const [hasError, setHasError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
 
   useEffect(() => {
     const handleCallback = async () => {
@@ -15,15 +18,18 @@ export default function AuthCallback() {
       }
 
       try {
-        // Check if there's an error in the URL
+        // Check if there's an error in the URL (both query params and hash)
+        const urlParams = new URLSearchParams(window.location.search);
         const hashParams = new URLSearchParams(window.location.hash.substring(1));
-        const error = hashParams.get('error');
-        const errorDescription = hashParams.get('error_description');
+        
+        const error = urlParams.get('error') || hashParams.get('error');
+        const errorDescription = urlParams.get('error_description') || hashParams.get('error_description');
         
         if (error) {
           console.error('Auth error:', error, errorDescription);
-          setStatus('Authentication failed. Redirecting...');
-          setTimeout(() => setLocation('/'), 2000);
+          setHasError(true);
+          setErrorMessage(errorDescription?.replace(/\+/g, ' ') || 'Authentication failed');
+          setStatus('Authentication failed');
           return;
         }
 
@@ -31,71 +37,92 @@ export default function AuthCallback() {
         setStatus('Completing sign in...');
         
         // Give Supabase time to process the hash and set the session
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 1000));
         
         // Now check for the session
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
           console.error('Session error:', sessionError);
-          setStatus('Session error. Redirecting...');
-          setTimeout(() => setLocation('/'), 2000);
+          setHasError(true);
+          setErrorMessage(sessionError.message);
+          setStatus('Session error');
           return;
         }
 
         if (session) {
           setStatus('Success! Redirecting to dashboard...');
-          // Clear the hash from URL before redirecting
-          window.history.replaceState(null, '', window.location.pathname);
+          // Clear the URL params before redirecting
+          window.history.replaceState(null, '', '/auth/callback');
           setTimeout(() => setLocation('/dashboard'), 500);
         } else {
-          // No session yet, try to exchange the code
-          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(
-            window.location.href
-          );
-          
-          if (exchangeError) {
-            console.error('Code exchange error:', exchangeError);
-            // The session might already be set via the hash, check again
-            const { data: { session: retrySession } } = await supabase.auth.getSession();
-            if (retrySession) {
+          // Try to exchange the code if present
+          const code = urlParams.get('code');
+          if (code) {
+            const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            
+            if (exchangeError) {
+              console.error('Code exchange error:', exchangeError);
+              setHasError(true);
+              setErrorMessage(exchangeError.message);
+              setStatus('Failed to complete sign in');
+              return;
+            }
+            
+            if (data?.session) {
               setStatus('Success! Redirecting to dashboard...');
-              window.history.replaceState(null, '', window.location.pathname);
+              window.history.replaceState(null, '', '/auth/callback');
               setTimeout(() => setLocation('/dashboard'), 500);
               return;
             }
           }
           
-          if (data?.session) {
-            setStatus('Success! Redirecting to dashboard...');
-            window.history.replaceState(null, '', window.location.pathname);
-            setTimeout(() => setLocation('/dashboard'), 500);
-          } else {
-            setStatus('No session found. Redirecting...');
-            setTimeout(() => setLocation('/'), 2000);
-          }
+          // No session found
+          setStatus('No session found. Please try again.');
+          setHasError(true);
+          setErrorMessage('Could not establish a session. Please try signing in again.');
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Auth callback error:', err);
-        setStatus('An error occurred. Redirecting...');
-        setTimeout(() => setLocation('/'), 2000);
+        setHasError(true);
+        setErrorMessage(err.message || 'An unexpected error occurred');
+        setStatus('An error occurred');
       }
     };
 
     handleCallback();
   }, [setLocation]);
 
+  const handleRetry = () => {
+    setLocation('/');
+  };
+
   return (
     <div className="flex h-screen items-center justify-center bg-background">
-      <div className="text-center">
+      <div className="text-center max-w-md px-6">
         <div className="flex items-center justify-center gap-2 mb-6">
           <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary">
             <Sparkles className="h-6 w-6 text-primary-foreground" />
           </div>
           <span className="text-2xl font-semibold tracking-tight">Claude Menu</span>
         </div>
-        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-        <p className="text-muted-foreground">{status}</p>
+        
+        {hasError ? (
+          <>
+            <div className="text-destructive mb-4">
+              <p className="font-medium text-lg">{status}</p>
+              <p className="text-sm mt-2">{errorMessage}</p>
+            </div>
+            <Button onClick={handleRetry} data-testid="button-retry-login">
+              Try Again
+            </Button>
+          </>
+        ) : (
+          <>
+            <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full mx-auto mb-4" />
+            <p className="text-muted-foreground">{status}</p>
+          </>
+        )}
       </div>
     </div>
   );
