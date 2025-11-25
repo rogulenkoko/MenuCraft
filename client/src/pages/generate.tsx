@@ -20,7 +20,7 @@ const MENU_SIZES = ["a4", "letter", "a5", "half-letter"] as const;
 
 export default function Generate() {
   const { toast } = useToast();
-  const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
+  const { user, profile, session, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
   const [, setLocation] = useLocation();
 
   const [inputMethod, setInputMethod] = useState<"file" | "text">("file");
@@ -174,7 +174,7 @@ export default function Generate() {
       return;
     }
 
-    if (!isSupabaseConfigured || !supabase || !user) {
+    if (!isSupabaseConfigured || !supabase || !user || !session) {
       toast({
         title: "Error",
         description: "Please sign in to generate menus",
@@ -201,18 +201,32 @@ export default function Generate() {
 
       if (insertError) throw insertError;
 
-      const response = await apiRequest('POST', '/api/generate', {
-        generationId: generation.id,
-        menuText,
-        colors,
-        size,
-        stylePrompt,
+      const response = await fetch('/api/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
+          generationId: generation.id,
+          menuText,
+          colors,
+          size,
+          stylePrompt,
+        }),
       });
 
-      if (response.htmlVariations) {
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to generate menu designs');
+      }
+
+      const data = await response.json();
+
+      if (data.htmlVariations) {
         const { error: updateError } = await supabase
           .from('menu_generations')
-          .update({ html_variations: response.htmlVariations })
+          .update({ html_variations: data.htmlVariations })
           .eq('id', generation.id);
 
         if (updateError) {
