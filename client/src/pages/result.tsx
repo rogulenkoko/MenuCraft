@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,21 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Sparkles, Download, LogOut, Loader2, ArrowLeft, Save, RotateCcw } from "lucide-react";
 import { Link, useLocation, useParams } from "wouter";
 import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
+
+function sanitizeHtml(html: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  doc.querySelectorAll('script').forEach(el => el.remove());
+  doc.querySelectorAll('[onclick], [onerror], [onload], [onmouseover]').forEach(el => {
+    el.removeAttribute('onclick');
+    el.removeAttribute('onerror');
+    el.removeAttribute('onload');
+    el.removeAttribute('onmouseover');
+  });
+  
+  return doc.documentElement.outerHTML;
+}
 
 export default function Result() {
   const { toast } = useToast();
@@ -21,6 +36,7 @@ export default function Result() {
   const [originalHtml, setOriginalHtml] = useState<string>("");
   const [isSaving, setIsSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [iframeKey, setIframeKey] = useState(0);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
@@ -73,32 +89,38 @@ export default function Result() {
     }
   }, [isAuthenticated, generationId, toast]);
 
-  useEffect(() => {
-    if (iframeRef.current && editedHtml) {
-      const iframe = iframeRef.current;
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+  const setupEditableIframe = useCallback((html: string) => {
+    if (!iframeRef.current) return;
+    
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    
+    if (iframeDoc) {
+      const sanitized = sanitizeHtml(html);
+      iframeDoc.open();
+      iframeDoc.write(sanitized);
+      iframeDoc.close();
+
+      iframeDoc.body.contentEditable = "true";
+      iframeDoc.body.style.cursor = "text";
       
-      if (iframeDoc) {
-        iframeDoc.open();
-        iframeDoc.write(editedHtml);
-        iframeDoc.close();
+      const handleInput = () => {
+        const newHtml = `<!DOCTYPE html><html>${iframeDoc.documentElement.innerHTML}</html>`;
+        setEditedHtml(newHtml);
+      };
 
-        iframeDoc.body.contentEditable = "true";
-        iframeDoc.body.style.cursor = "text";
-        
-        const handleInput = () => {
-          const newHtml = `<!DOCTYPE html><html>${iframeDoc.documentElement.innerHTML}</html>`;
-          setEditedHtml(newHtml);
-        };
-
-        iframeDoc.body.addEventListener('input', handleInput);
-        
-        return () => {
-          iframeDoc.body.removeEventListener('input', handleInput);
-        };
-      }
+      iframeDoc.body.addEventListener('input', handleInput);
     }
-  }, [originalHtml]);
+  }, []);
+
+  useEffect(() => {
+    if (editedHtml && iframeRef.current) {
+      const timer = setTimeout(() => {
+        setupEditableIframe(editedHtml);
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [iframeKey, editedHtml, setupEditableIframe]);
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -137,16 +159,7 @@ export default function Result() {
 
   const handleReset = () => {
     setEditedHtml(originalHtml);
-    if (iframeRef.current) {
-      const iframe = iframeRef.current;
-      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
-      if (iframeDoc) {
-        iframeDoc.open();
-        iframeDoc.write(originalHtml);
-        iframeDoc.close();
-        iframeDoc.body.contentEditable = "true";
-      }
-    }
+    setIframeKey(prev => prev + 1);
     toast({
       title: "Reset",
       description: "Menu content has been reset to original",
@@ -380,10 +393,12 @@ export default function Result() {
               <Card className="overflow-hidden shadow-lg">
                 <div className="bg-white">
                   <iframe
+                    key={iframeKey}
                     ref={iframeRef}
                     className="w-full border-0"
                     style={{ minHeight: '800px', height: 'auto' }}
                     title="Menu Preview"
+                    sandbox="allow-same-origin"
                     data-testid="iframe-menu-preview"
                   />
                 </div>

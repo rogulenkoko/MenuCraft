@@ -577,7 +577,9 @@ Requirements:
 - Make text elements easy to identify for editing (use semantic tags like h1, h2, h3, p, span)
 - NO JavaScript
 - Professional, restaurant-quality design
-- Ensure the design looks beautiful when printed as PDF`;
+- Ensure the design looks beautiful when printed as PDF
+
+IMPORTANT: Output ONLY the raw HTML code. Do NOT wrap it in markdown code blocks or add any explanations. Start directly with <!DOCTYPE html> and end with </html>.`;
 
     const userPrompt = `Create a modern, elegant HTML menu design. ${stylePrompt}
 
@@ -598,11 +600,27 @@ Create a complete HTML file that can be opened directly in a browser and printed
 
     const htmlContent = message.content[0].type === 'text' ? message.content[0].text : '';
     
-    // Extract HTML if it's wrapped in code blocks
-    let cleanHtml = htmlContent;
-    const htmlMatch = htmlContent.match(/```html\n([\s\S]*?)```/) || htmlContent.match(/```\n([\s\S]*?)```/);
+    // Extract HTML if it's wrapped in code blocks (handle various formats)
+    let cleanHtml = htmlContent.trim();
+    
+    // Try to extract from markdown code blocks
+    const htmlMatch = cleanHtml.match(/```(?:html)?\s*\n?([\s\S]*?)```/);
     if (htmlMatch) {
-      cleanHtml = htmlMatch[1];
+      cleanHtml = htmlMatch[1].trim();
+    }
+    
+    // Ensure it starts with DOCTYPE or html tag
+    if (!cleanHtml.toLowerCase().startsWith('<!doctype') && !cleanHtml.toLowerCase().startsWith('<html')) {
+      // Try to find the HTML document start
+      const doctypeIndex = cleanHtml.toLowerCase().indexOf('<!doctype');
+      const htmlIndex = cleanHtml.toLowerCase().indexOf('<html');
+      const startIndex = Math.min(
+        doctypeIndex >= 0 ? doctypeIndex : Infinity,
+        htmlIndex >= 0 ? htmlIndex : Infinity
+      );
+      if (startIndex !== Infinity) {
+        cleanHtml = cleanHtml.substring(startIndex);
+      }
     }
 
     // Return as array with single element for backwards compatibility
