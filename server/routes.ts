@@ -27,25 +27,34 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
 // Create or retrieve the subscription price
 // In production, this should be a configured price ID
 const CLAUDE_MENU_PRO_PRICE_ID = process.env.STRIPE_PRICE_ID || null;
+let cachedPriceId: string | null = null;
+
 async function getSubscriptionPrice(): Promise<string> {
   // Use configured price if available
   if (CLAUDE_MENU_PRO_PRICE_ID) {
     return CLAUDE_MENU_PRO_PRICE_ID;
   }
   
-  // Otherwise create price on the fly (for development)
+  // Return cached price if already created
+  if (cachedPriceId) {
+    return cachedPriceId;
+  }
+  
+  // Create product first, then price (for development)
+  const product = await stripe.products.create({
+    name: 'Claude Menu Pro',
+  });
+  
   const price = await stripe.prices.create({
     currency: 'usd',
     unit_amount: 2900, // $29.00
     recurring: {
       interval: 'month',
     },
-    product_data: {
-      name: 'Claude Menu Pro',
-      description: 'Unlimited menu generations with AI',
-    },
+    product: product.id,
   });
   
+  cachedPriceId = price.id;
   return price.id;
 }
 
@@ -166,49 +175,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Stripe Checkout - Create a checkout session for new subscribers
-  app.post('/api/stripe/checkout', verifySupabaseToken, async (req: any, res) => {
+  // Stripe Checkout - Simple checkout session (no auth required)
+  app.post('/api/stripe/checkout', async (req: any, res) => {
     try {
-      const { returnUrl } = req.body;
-      const userId = req.supabaseUser?.id;
-      const userEmail = req.supabaseUser?.email;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "User not authenticated" });
-      }
-
-      // Get or create Stripe customer
-      let customerId: string | undefined;
-      
-      // Try to find existing customer by email
-      if (userEmail) {
-        const existingCustomers = await stripe.customers.list({
-          email: userEmail,
-          limit: 1,
-        });
-        
-        if (existingCustomers.data.length > 0) {
-          customerId = existingCustomers.data[0].id;
-        }
-      }
-      
-      // Create customer if not found
-      if (!customerId) {
-        const customer = await stripe.customers.create({
-          email: userEmail || undefined,
-          metadata: {
-            supabase_user_id: userId,
-          },
-        });
-        customerId = customer.id;
-      }
+      const { returnUrl, email } = req.body;
+      const baseUrl = returnUrl || `https://${req.headers.host}`;
 
       // Get subscription price
       const priceId = await getSubscriptionPrice();
 
-      // Create checkout session
-      const session = await stripe.checkout.sessions.create({
-        customer: customerId,
+      // Create checkout session - Stripe will collect email if not provided
+      const sessionConfig: Stripe.Checkout.SessionCreateParams = {
         mode: 'subscription',
         payment_method_types: ['card'],
         line_items: [
@@ -217,13 +194,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             quantity: 1,
           },
         ],
-        success_url: `${returnUrl || 'https://' + req.headers.host}/dashboard?subscription=success`,
-        cancel_url: `${returnUrl || 'https://' + req.headers.host}/subscribe?subscription=cancelled`,
-        metadata: {
-          supabase_user_id: userId,
-        },
-      });
+        success_url: `${baseUrl}/dashboard?subscription=success`,
+        cancel_url: `${baseUrl}/subscribe?subscription=cancelled`,
+      };
 
+      // Pre-fill email if provided
+      if (email) {
+        sessionConfig.customer_email = email;
+      }
+
+      const session = await stripe.checkout.sessions.create(sessionConfig);
       res.json({ url: session.url });
     } catch (error: any) {
       console.error('Stripe checkout error:', error);
@@ -231,39 +211,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Stripe Customer Portal - Allow existing subscribers to manage their subscription
-  app.post('/api/stripe/portal', verifySupabaseToken, async (req: any, res) => {
+  // Stripe Customer Portal - Simple portal access by email
+  app.post('/api/stripe/portal', async (req: any, res) => {
     try {
-      const { returnUrl } = req.body;
-      const userId = req.supabaseUser?.id;
-      const userEmail = req.supabaseUser?.email;
-      
-      if (!userId) {
-        return res.status(401).json({ message: "User not authenticated" });
+      const { returnUrl, email } = req.body;
+      const baseUrl = returnUrl || `https://${req.headers.host}`;
+
+      if (!email) {
+        return res.status(400).json({ message: "Email is required" });
       }
 
       // Find customer by email
-      let customerId: string | undefined;
-      
-      if (userEmail) {
-        const existingCustomers = await stripe.customers.list({
-          email: userEmail,
-          limit: 1,
-        });
-        
-        if (existingCustomers.data.length > 0) {
-          customerId = existingCustomers.data[0].id;
-        }
+      const existingCustomers = await stripe.customers.list({
+        email: email,
+        limit: 1,
+      });
+
+      if (existingCustomers.data.length === 0) {
+        return res.status(404).json({ message: "No subscription found for this email" });
       }
-      
-      if (!customerId) {
-        return res.status(404).json({ message: "No subscription found for this user" });
-      }
+
+      const customerId = existingCustomers.data[0].id;
 
       // Create portal session
       const portalSession = await stripe.billingPortal.sessions.create({
         customer: customerId,
-        return_url: `${returnUrl || 'https://' + req.headers.host}/subscribe`,
+        return_url: `${baseUrl}/subscribe`,
       });
 
       res.json({ url: portalSession.url });

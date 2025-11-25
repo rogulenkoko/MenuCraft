@@ -1,5 +1,4 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/lib/supabase';
 import { useSupabaseAuth } from './useSupabaseAuth';
 
 const SUBSCRIPTION_REQUIRED = import.meta.env.VITE_SUBSCRIPTION_REQUIRED !== 'false';
@@ -12,7 +11,7 @@ interface SubscriptionState {
 }
 
 export function useSubscription() {
-  const { profile, isAuthenticated, refreshProfile, session } = useSupabaseAuth();
+  const { profile, isAuthenticated, refreshProfile, user } = useSupabaseAuth();
   const [state, setState] = useState<SubscriptionState>({
     hasActiveSubscription: false,
     subscriptionRequired: SUBSCRIPTION_REQUIRED,
@@ -48,19 +47,15 @@ export function useSubscription() {
     }
 
     try {
-      // Get the current session token
-      const token = session?.access_token;
-      if (!token) {
-        throw new Error('Not authenticated');
-      }
-
       const response = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ returnUrl: window.location.origin }),
+        body: JSON.stringify({ 
+          returnUrl: window.location.origin,
+          email: user?.email 
+        }),
       });
 
       const data = await response.json();
@@ -78,23 +73,24 @@ export function useSubscription() {
       console.error('Checkout error:', error);
       return { error };
     }
-  }, [session]);
+  }, [user?.email]);
 
   const openCustomerPortal = useCallback(async () => {
     try {
-      // Get the current session token
-      const token = session?.access_token;
-      if (!token) {
-        throw new Error('Not authenticated');
+      const email = user?.email;
+      if (!email) {
+        throw new Error('Email is required to access billing portal');
       }
 
       const response = await fetch('/api/stripe/portal', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ returnUrl: window.location.origin }),
+        body: JSON.stringify({ 
+          returnUrl: window.location.origin,
+          email 
+        }),
       });
 
       const data = await response.json();
@@ -112,7 +108,7 @@ export function useSubscription() {
       console.error('Portal error:', error);
       return { error };
     }
-  }, [session]);
+  }, [user?.email]);
 
   return {
     ...state,
