@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase, Profile } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { useSupabaseAuth } from './useSupabaseAuth';
 
 const SUBSCRIPTION_REQUIRED = import.meta.env.VITE_SUBSCRIPTION_REQUIRED !== 'false';
@@ -12,7 +12,7 @@ interface SubscriptionState {
 }
 
 export function useSubscription() {
-  const { profile, isAuthenticated, refreshProfile } = useSupabaseAuth();
+  const { profile, isAuthenticated, refreshProfile, session } = useSupabaseAuth();
   const [state, setState] = useState<SubscriptionState>({
     hasActiveSubscription: false,
     subscriptionRequired: SUBSCRIPTION_REQUIRED,
@@ -48,11 +48,26 @@ export function useSubscription() {
     }
 
     try {
-      const { data, error } = await supabase.functions.invoke('stripe-checkout', {
-        body: { returnUrl: window.location.origin },
+      // Get the current session token
+      const token = session?.access_token;
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ returnUrl: window.location.origin }),
       });
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to create checkout session');
+      }
 
       if (data?.url) {
         window.location.href = data.url;
@@ -63,15 +78,30 @@ export function useSubscription() {
       console.error('Checkout error:', error);
       return { error };
     }
-  }, []);
+  }, [session]);
 
   const openCustomerPortal = useCallback(async () => {
     try {
-      const { data, error } = await supabase.functions.invoke('stripe-portal', {
-        body: { returnUrl: window.location.origin },
+      // Get the current session token
+      const token = session?.access_token;
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      const response = await fetch('/api/stripe/portal', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ returnUrl: window.location.origin }),
       });
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || 'Failed to open customer portal');
+      }
 
       if (data?.url) {
         window.location.href = data.url;
@@ -82,7 +112,7 @@ export function useSubscription() {
       console.error('Portal error:', error);
       return { error };
     }
-  }, []);
+  }, [session]);
 
   return {
     ...state,

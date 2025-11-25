@@ -166,6 +166,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Stripe Checkout - Create a checkout session for new subscribers
+  app.post('/api/stripe/checkout', verifySupabaseToken, async (req: any, res) => {
+    try {
+      const { returnUrl } = req.body;
+      const userId = req.supabaseUser?.id;
+      const userEmail = req.supabaseUser?.email;
+      
+      if (!userId) {
+        return res.status(401).json({ message: "User not authenticated" });
+      }
+
+      // Get or create Stripe customer
+      let customerId: string | undefined;
+      
+      // Try to find existing customer by email
+      if (userEmail) {
+        const existingCustomers = await stripe.customers.list({
+          email: userEmail,
+          limit: 1,
+        });
+        
+        if (existingCustomers.data.length > 0) {
+          customerId = existingCustomers.data[0].id;
+        }
+      }
+      
+      // Create customer if not found
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: userEmail || undefined,
+          metadata: {
+            supabase_user_id: userId,
+          },
+        });
+        customerId = customer.id;
+      }
+
+      // Get subscription price
+      const priceId = await getSubscriptionPrice();
+
+      // Create checkout session
+      const session = await stripe.checkout.sessions.create({
+        customer: customerId,
+        mode: 'subscription',
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price: priceId,
+            quantity: 1,
+          },
+        ],
+        success_url: `${returnUrl || 'https://' + req.headers.host}/dashboard?subscription=success`,
+        cancel_url: `${returnUrl || 'https://' + req.headers.host}/subscribe?subscription=cancelled`,
+        metadata: {
+          supabase_user_id: userId,
+        },
+      });
+
+      res.json({ url: session.url });
+    } catch (error: any) {
+      console.error('Stripe checkout error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create checkout session' });
+    }
+  });
+
+  // Stripe Customer Portal - Allow existing subscribers to manage their subscription
+  app.post('/api/stripe/portal', verifySupabaseToken, async (req: any, res) => {
+    try {
+      const { returnUrl } = req.body;
+      const userId = req.supabaseUser?.id;
+      const userEmail = req.supabaseUser?.email;
+      
+      if (!userId) {
+        return res.status(401).json({ message: "User not authenticated" });
+      }
+
+      // Find customer by email
+      let customerId: string | undefined;
+      
+      if (userEmail) {
+        const existingCustomers = await stripe.customers.list({
+          email: userEmail,
+          limit: 1,
+        });
+        
+        if (existingCustomers.data.length > 0) {
+          customerId = existingCustomers.data[0].id;
+        }
+      }
+      
+      if (!customerId) {
+        return res.status(404).json({ message: "No subscription found for this user" });
+      }
+
+      // Create portal session
+      const portalSession = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: `${returnUrl || 'https://' + req.headers.host}/subscribe`,
+      });
+
+      res.json({ url: portalSession.url });
+    } catch (error: any) {
+      console.error('Stripe portal error:', error);
+      res.status(500).json({ message: error.message || 'Failed to open customer portal' });
+    }
+  });
+
   // Create subscription route
   app.post('/api/create-subscription', isAuthenticated, async (req: any, res) => {
     try {
