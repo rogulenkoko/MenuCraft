@@ -40,25 +40,31 @@ export function useSupabaseAuth() {
   const createOrUpdateProfile = useCallback(async (user: User) => {
     if (!isSupabaseConfigured || !supabase) return null;
 
+    // First try to fetch existing profile
     const { data: existingProfile } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', user.id)
       .single();
 
-    if (!existingProfile) {
-      const { error } = await supabase.from('profiles').insert({
-        id: user.id,
-        email: user.email,
-        name: user.user_metadata?.full_name || user.user_metadata?.name || null,
-        avatar_url: user.user_metadata?.avatar_url || null,
-      });
-
-      if (error) {
-        console.error('Error creating profile:', error);
-      }
+    if (existingProfile) {
+      return existingProfile as Profile;
     }
 
+    // Profile doesn't exist, create it
+    const { error } = await supabase.from('profiles').insert({
+      id: user.id,
+      email: user.email,
+      name: user.user_metadata?.full_name || user.user_metadata?.name || null,
+      avatar_url: user.user_metadata?.avatar_url || null,
+    });
+
+    // Ignore duplicate key error (23505) - profile might have been created by another request
+    if (error && error.code !== '23505') {
+      console.error('Error creating profile:', error);
+    }
+
+    // Fetch and return the profile
     return fetchProfile(user.id);
   }, [fetchProfile]);
 
