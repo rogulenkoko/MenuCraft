@@ -1,0 +1,93 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  console.warn('Supabase credentials not configured. Some features may not work.');
+}
+
+export const supabase = createClient(
+  supabaseUrl || '',
+  supabaseAnonKey || '',
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: true,
+    },
+  }
+);
+
+export type Database = {
+  public: {
+    Tables: {
+      profiles: {
+        Row: {
+          id: string;
+          email: string | null;
+          name: string | null;
+          avatar_url: string | null;
+          stripe_customer_id: string | null;
+          stripe_subscription_id: string | null;
+          subscription_status: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          email?: string | null;
+          name?: string | null;
+          avatar_url?: string | null;
+          stripe_customer_id?: string | null;
+          stripe_subscription_id?: string | null;
+          subscription_status?: string | null;
+        };
+        Update: {
+          email?: string | null;
+          name?: string | null;
+          avatar_url?: string | null;
+          stripe_customer_id?: string | null;
+          stripe_subscription_id?: string | null;
+          subscription_status?: string | null;
+        };
+      };
+      menu_generations: {
+        Row: {
+          id: string;
+          user_id: string;
+          file_name: string;
+          extracted_text: string;
+          colors: string[];
+          size: string;
+          style_prompt: string;
+          html_variations: string[] | null;
+          selected_variation: number | null;
+          is_downloaded: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          file_name: string;
+          extracted_text: string;
+          colors: string[];
+          size: string;
+          style_prompt: string;
+          html_variations?: string[] | null;
+          selected_variation?: number | null;
+          is_downloaded?: boolean;
+        };
+        Update: {
+          html_variations?: string[] | null;
+          selected_variation?: number | null;
+          is_downloaded?: boolean;
+        };
+      };
+    };
+  };
+};
+
+export type Profile = Database['public']['Tables']['profiles']['Row'];
+export type MenuGeneration = Database['public']['Tables']['menu_generations']['Row'];
+export type InsertMenuGeneration = Database['public']['Tables']['menu_generations']['Insert'];

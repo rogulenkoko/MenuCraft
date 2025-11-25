@@ -1,0 +1,94 @@
+Refactor the entire application according to the following requirements:
+
+Remove as many backend and server dependencies as possible.
+The app should work primarily on the client side using JavaScript/TypeScript and direct API calls.
+
+Completely remove any existing backend authentication logic, including:
+
+NextAuth
+
+Custom auth routes
+
+Custom middleware
+
+Custom API endpoints related to authentication
+
+Any local database-based auth
+
+Replace all authentication with Supabase Auth using Google OAuth.
+Implement the following:
+
+Client-side login with Supabase signInWithOAuth({ provider: "google" })
+
+Session handling using Supabase built-in session storage
+
+Logout with supabase.auth.signOut()
+
+User state stored and reactive through Supabase Auth helpers
+
+Use Supabase as the ONLY database for the entire app.
+Remove all references to other databases or backend services.
+Replace them with:
+
+Supabase tables
+
+Supabase storage (if needed)
+
+Direct CRUD operations from the client
+
+All application data (projects, menu generations, user selections, etc.) must be stored in Supabase.
+No backend server should be required to read or write data.
+
+The app should remain fully functional even without a backend server.
+All logic should work via:
+
+Supabase client
+
+Claude API calls
+
+Client-side React components
+
+Make sure Stripe subscription logic is optional, controlled by a config flag.
+If subscription is disabled:
+
+No Stripe UI
+
+No paywalls
+
+All features free
+
+Ensure the entire application is optimized for a pure frontend deployment, like:
+
+Vercel static hosting
+
+Replit deployments
+
+Netlify
+
+Supabase Edge Functions (optional only)
+
+Provide fully functional code, including:
+
+Supabase client initialization
+
+Auth UI components
+
+Hooks for session handling
+
+Refactored pages
+
+Updated logic for user data
+
+Updated API call logic for Claude
+
+After refactoring, ensure the project:
+
+works end-to-end
+
+allows login with Google
+
+stores user data in Supabase
+
+generates and displays AI menus
+
+optionally blocks downloads using the subscription flag
