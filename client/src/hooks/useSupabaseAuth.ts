@@ -69,7 +69,10 @@ export function useSupabaseAuth() {
   }, [fetchProfile]);
 
   useEffect(() => {
+    console.log('[Auth] Starting auth initialization, isSupabaseConfigured:', isSupabaseConfigured);
+    
     if (!isSupabaseConfigured || !supabase) {
+      console.log('[Auth] Supabase not configured, setting isLoading to false');
       setAuthState({
         user: null,
         profile: null,
@@ -84,14 +87,38 @@ export function useSupabaseAuth() {
     let isMounted = true;
 
     const initAuth = async () => {
+      console.log('[Auth] Calling getSession...');
       try {
-        const { data: { session } } = await supabase.auth.getSession();
+        const timeoutPromise = new Promise<never>((_, reject) => 
+          setTimeout(() => reject(new Error('Auth request timeout after 10s')), 10000)
+        );
+        
+        const sessionPromise = supabase.auth.getSession();
+        const result = await Promise.race([sessionPromise, timeoutPromise]);
+        
+        const { data, error } = result;
+        
+        if (error) {
+          console.error('[Auth] getSession returned error:', JSON.stringify(error));
+          throw error;
+        }
+        
+        const session = data?.session;
+        console.log('[Auth] getSession completed, session:', session ? 'exists' : 'null');
         
         if (!isMounted) return;
 
         if (session?.user) {
-          const profile = await createOrUpdateProfile(session.user);
+          console.log('[Auth] User found, fetching profile...');
+          let profile = null;
+          try {
+            profile = await createOrUpdateProfile(session.user);
+            console.log('[Auth] Profile fetched:', profile ? 'exists' : 'null');
+          } catch (profileError) {
+            console.error('[Auth] Profile fetch error:', profileError);
+          }
           if (!isMounted) return;
+          console.log('[Auth] Setting authenticated state');
           setAuthState({
             user: session.user,
             profile,
@@ -101,6 +128,7 @@ export function useSupabaseAuth() {
             isSupabaseReady: true,
           });
         } else {
+          console.log('[Auth] No user, setting unauthenticated state');
           setAuthState({
             user: null,
             profile: null,
@@ -110,8 +138,8 @@ export function useSupabaseAuth() {
             isSupabaseReady: true,
           });
         }
-      } catch (error) {
-        console.error('Auth initialization error:', error);
+      } catch (error: any) {
+        console.error('[Auth] Auth initialization error:', error?.message || error);
         if (!isMounted) return;
         setAuthState({
           user: null,
