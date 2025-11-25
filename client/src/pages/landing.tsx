@@ -1,12 +1,28 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Upload, Sparkles, Download, Palette, ChevronRight } from "lucide-react";
+import { SiGoogle } from "react-icons/si";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Landing() {
+  const { signInWithGoogle } = useSupabaseAuth();
+  const { toast } = useToast();
+
+  const handleSignIn = async () => {
+    const { error } = await signInWithGoogle();
+    if (error) {
+      toast({
+        title: "Sign in failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="fixed top-0 left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-md">
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
@@ -22,13 +38,14 @@ export default function Landing() {
               <ThemeToggle />
               <Button
                 variant="ghost"
-                onClick={() => window.location.href = "/api/login"}
+                onClick={handleSignIn}
                 data-testid="button-sign-in"
               >
+                <SiGoogle className="h-4 w-4 mr-2" />
                 Sign In
               </Button>
               <Button
-                onClick={() => window.location.href = "/api/login"}
+                onClick={handleSignIn}
                 data-testid="button-get-started-header"
               >
                 Get Started
@@ -38,7 +55,6 @@ export default function Landing() {
         </div>
       </header>
 
-      {/* Hero Section */}
       <section className="relative pt-32 pb-20 md:pt-40 md:pb-32">
         <div className="mx-auto max-w-7xl px-6">
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
@@ -57,10 +73,11 @@ export default function Landing() {
                 <Button
                   size="lg"
                   className="text-lg px-8 py-6"
-                  onClick={() => window.location.href = "/api/login"}
+                  onClick={handleSignIn}
                   data-testid="button-start-generating"
                 >
-                  Start Generating
+                  <SiGoogle className="h-5 w-5 mr-2" />
+                  Start with Google
                   <ChevronRight className="ml-2 h-5 w-5" />
                 </Button>
                 <Button
@@ -93,7 +110,6 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Features Section */}
       <section className="py-16 md:py-24 bg-muted/30">
         <div className="mx-auto max-w-7xl px-6">
           <div className="text-center mb-16">
@@ -136,7 +152,6 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* How It Works Section */}
       <section className="py-16 md:py-24">
         <div className="mx-auto max-w-7xl px-6">
           <div className="text-center mb-16">
@@ -185,7 +200,6 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* CTA Section */}
       <section className="py-16 md:py-24 bg-primary text-primary-foreground">
         <div className="mx-auto max-w-4xl px-6 text-center">
           <h2 className="text-4xl md:text-5xl font-bold mb-6" data-testid="text-cta-title">
@@ -198,16 +212,16 @@ export default function Landing() {
             size="lg"
             variant="secondary"
             className="text-lg px-8 py-6"
-            onClick={() => window.location.href = "/api/login"}
+            onClick={handleSignIn}
             data-testid="button-get-started-cta"
           >
-            Get Started Now
+            <SiGoogle className="h-5 w-5 mr-2" />
+            Get Started with Google
             <ChevronRight className="ml-2 h-5 w-5" />
           </Button>
         </div>
       </section>
 
-      {/* Footer */}
       <footer className="border-t py-12">
         <div className="mx-auto max-w-7xl px-6">
           <div className="grid gap-8 md:grid-cols-4">

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { User, Session, AuthError } from '@supabase/supabase-js';
-import { supabase, Profile } from '@/lib/supabase';
+import { supabase, Profile, isSupabaseConfigured } from '@/lib/supabase';
 
 interface AuthState {
   user: User | null;
@@ -8,6 +8,7 @@ interface AuthState {
   session: Session | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  isSupabaseReady: boolean;
 }
 
 export function useSupabaseAuth() {
@@ -15,11 +16,14 @@ export function useSupabaseAuth() {
     user: null,
     profile: null,
     session: null,
-    isLoading: true,
+    isLoading: isSupabaseConfigured,
     isAuthenticated: false,
+    isSupabaseReady: isSupabaseConfigured,
   });
 
   const fetchProfile = useCallback(async (userId: string) => {
+    if (!isSupabaseConfigured || !supabase) return null;
+    
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -34,6 +38,8 @@ export function useSupabaseAuth() {
   }, []);
 
   const createOrUpdateProfile = useCallback(async (user: User) => {
+    if (!isSupabaseConfigured || !supabase) return null;
+
     const { data: existingProfile } = await supabase
       .from('profiles')
       .select('*')
@@ -57,6 +63,11 @@ export function useSupabaseAuth() {
   }, [fetchProfile]);
 
   useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      setAuthState(prev => ({ ...prev, isLoading: false }));
+      return;
+    }
+
     const initAuth = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
@@ -69,6 +80,7 @@ export function useSupabaseAuth() {
             session,
             isLoading: false,
             isAuthenticated: true,
+            isSupabaseReady: true,
           });
         } else {
           setAuthState({
@@ -77,6 +89,7 @@ export function useSupabaseAuth() {
             session: null,
             isLoading: false,
             isAuthenticated: false,
+            isSupabaseReady: true,
           });
         }
       } catch (error) {
@@ -87,6 +100,7 @@ export function useSupabaseAuth() {
           session: null,
           isLoading: false,
           isAuthenticated: false,
+          isSupabaseReady: true,
         });
       }
     };
@@ -103,6 +117,7 @@ export function useSupabaseAuth() {
             session,
             isLoading: false,
             isAuthenticated: true,
+            isSupabaseReady: true,
           });
         } else {
           setAuthState({
@@ -111,6 +126,7 @@ export function useSupabaseAuth() {
             session: null,
             isLoading: false,
             isAuthenticated: false,
+            isSupabaseReady: true,
           });
         }
       }
@@ -122,6 +138,10 @@ export function useSupabaseAuth() {
   }, [createOrUpdateProfile]);
 
   const signInWithGoogle = useCallback(async (): Promise<{ error: AuthError | null }> => {
+    if (!isSupabaseConfigured || !supabase) {
+      return { error: { message: 'Supabase not configured', name: 'ConfigError', status: 500 } as AuthError };
+    }
+    
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
@@ -132,6 +152,10 @@ export function useSupabaseAuth() {
   }, []);
 
   const signOut = useCallback(async (): Promise<{ error: AuthError | null }> => {
+    if (!isSupabaseConfigured || !supabase) {
+      return { error: { message: 'Supabase not configured', name: 'ConfigError', status: 500 } as AuthError };
+    }
+    
     const { error } = await supabase.auth.signOut();
     if (!error) {
       setAuthState({
@@ -140,6 +164,7 @@ export function useSupabaseAuth() {
         session: null,
         isLoading: false,
         isAuthenticated: false,
+        isSupabaseReady: true,
       });
     }
     return { error };
