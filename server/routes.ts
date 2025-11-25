@@ -440,8 +440,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let userMessage = "We encountered an issue generating your menu designs. Please try again later.";
       
       // Check if it's an Anthropic API error about credits
-      if (error.message && error.message.includes("credit balance")) {
-        userMessage = "Menu generation is temporarily unavailable. Please try again in a few moments.";
+      if (error.message && (error.message.includes("credit balance") || error.message.includes("too low"))) {
+        userMessage = "The AI service is temporarily unavailable due to API credit limits. Please contact the administrator.";
       }
       
       res.status(500).json({ message: userMessage });
