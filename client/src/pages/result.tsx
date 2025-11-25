@@ -1,27 +1,27 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
-import { useSubscription } from "@/hooks/useSubscription";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, Download, Check, LogOut, Loader2, ArrowLeft } from "lucide-react";
+import { Sparkles, Download, LogOut, Loader2, ArrowLeft, Save, RotateCcw } from "lucide-react";
 import { Link, useLocation, useParams } from "wouter";
 import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
 
 export default function Result() {
   const { toast } = useToast();
   const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
-  const { canDownload, subscriptionRequired, hasActiveSubscription } = useSubscription();
   const [, setLocation] = useLocation();
   const params = useParams<{ id: string }>();
   const generationId = params.id;
 
   const [generation, setGeneration] = useState<MenuGeneration | null>(null);
   const [generationLoading, setGenerationLoading] = useState(true);
-  const [selectedVariation, setSelectedVariation] = useState<number | null>(null);
-  const [isSelecting, setIsSelecting] = useState(false);
+  const [editedHtml, setEditedHtml] = useState<string>("");
+  const [originalHtml, setOriginalHtml] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated && isSupabaseReady) {
@@ -52,7 +52,10 @@ export default function Result() {
 
         if (error) throw error;
         setGeneration(data);
-        setSelectedVariation(data.selected_variation);
+        
+        const html = data.html_variations?.[0] || "";
+        setEditedHtml(html);
+        setOriginalHtml(html);
       } catch (error) {
         console.error('Error fetching generation:', error);
         toast({
@@ -70,6 +73,33 @@ export default function Result() {
     }
   }, [isAuthenticated, generationId, toast]);
 
+  useEffect(() => {
+    if (iframeRef.current && editedHtml) {
+      const iframe = iframeRef.current;
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(editedHtml);
+        iframeDoc.close();
+
+        iframeDoc.body.contentEditable = "true";
+        iframeDoc.body.style.cursor = "text";
+        
+        const handleInput = () => {
+          const newHtml = `<!DOCTYPE html><html>${iframeDoc.documentElement.innerHTML}</html>`;
+          setEditedHtml(newHtml);
+        };
+
+        iframeDoc.body.addEventListener('input', handleInput);
+        
+        return () => {
+          iframeDoc.body.removeEventListener('input', handleInput);
+        };
+      }
+    }
+  }, [originalHtml]);
+
   const handleSignOut = async () => {
     const { error } = await signOut();
     if (!error) {
@@ -77,75 +107,100 @@ export default function Result() {
     }
   };
 
-  const handleSelectVariation = async (index: number) => {
+  const handleSave = async () => {
     if (!supabase || !generationId) return;
     
-    setIsSelecting(true);
+    setIsSaving(true);
     try {
       const { error } = await supabase
         .from('menu_generations')
-        .update({ selected_variation: index })
+        .update({ html_variations: [editedHtml] })
         .eq('id', generationId);
 
       if (error) throw error;
-      setSelectedVariation(index);
+      
+      setOriginalHtml(editedHtml);
       toast({
-        title: "Design Selected",
-        description: `You've selected design variation ${index + 1}`,
+        title: "Saved",
+        description: "Your menu changes have been saved",
       });
     } catch (error: any) {
       toast({
-        title: "Selection Failed",
+        title: "Save Failed",
         description: error.message,
         variant: "destructive",
       });
     } finally {
-      setIsSelecting(false);
+      setIsSaving(false);
     }
   };
 
-  const handleDownload = async (index: number) => {
-    if (!canDownload) {
-      toast({
-        title: "Subscription Required",
-        description: "Please subscribe to download your menu designs",
-        variant: "destructive",
-      });
-      return;
+  const handleReset = () => {
+    setEditedHtml(originalHtml);
+    if (iframeRef.current) {
+      const iframe = iframeRef.current;
+      const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+      if (iframeDoc) {
+        iframeDoc.open();
+        iframeDoc.write(originalHtml);
+        iframeDoc.close();
+        iframeDoc.body.contentEditable = "true";
+      }
     }
+    toast({
+      title: "Reset",
+      description: "Menu content has been reset to original",
+    });
+  };
 
-    if (!generation?.html_variations?.[index]) {
-      toast({
-        title: "Error",
-        description: "Design not found",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  const handleDownloadPdf = async () => {
     setIsDownloading(true);
+    
     try {
-      const html = generation.html_variations[index];
-      const blob = new Blob([html], { type: 'text/html' });
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        throw new Error('Could not open print window. Please allow popups.');
+      }
+      
+      printWindow.document.write(editedHtml);
+      printWindow.document.close();
+      
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
+      };
+      
+      toast({
+        title: "Print Dialog Opened",
+        description: "Select 'Save as PDF' in the print dialog to download your menu",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Download Failed",
+        description: error.message || "Could not generate PDF",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleDownloadHtml = () => {
+    try {
+      const blob = new Blob([editedHtml], { type: 'text/html' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `menu-design-${index + 1}.html`;
+      a.download = `menu-${generation?.file_name || 'design'}.html`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-
-      if (supabase && generationId) {
-        await supabase
-          .from('menu_generations')
-          .update({ is_downloaded: true })
-          .eq('id', generationId);
-      }
-
+      
       toast({
-        title: "Download Started",
-        description: "Your menu design is downloading",
+        title: "Downloaded",
+        description: "HTML file has been downloaded",
       });
     } catch (error: any) {
       toast({
@@ -153,8 +208,6 @@ export default function Result() {
         description: error.message,
         variant: "destructive",
       });
-    } finally {
-      setIsDownloading(false);
     }
   };
 
@@ -185,13 +238,13 @@ export default function Result() {
 
   const userName = profile?.name || user.user_metadata?.full_name || user.email;
   const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
-  const htmlVariations = generation?.html_variations || [];
+  const hasChanges = editedHtml !== originalHtml;
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
+      <header className="border-b bg-background shrink-0">
         <div className="mx-auto max-w-7xl px-6 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <Link href="/dashboard">
               <div className="flex items-center gap-2 cursor-pointer">
                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
@@ -200,7 +253,7 @@ export default function Result() {
                 <span className="text-xl font-semibold tracking-tight">Claude Menu</span>
               </div>
             </Link>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-4 flex-wrap">
               <Link href="/dashboard">
                 <Button variant="ghost" data-testid="button-dashboard">
                   Dashboard
@@ -215,7 +268,7 @@ export default function Result() {
                     className="h-8 w-8 rounded-full object-cover"
                   />
                 )}
-                <span className="text-sm font-medium">{userName}</span>
+                <span className="text-sm font-medium hidden sm:inline">{userName}</span>
               </div>
               <Button
                 variant="ghost"
@@ -230,139 +283,114 @@ export default function Result() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-6 py-12">
-        <div className="mb-8">
-          <Link href="/dashboard">
-            <Button variant="ghost" className="mb-4" data-testid="button-back">
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Dashboard
-            </Button>
-          </Link>
-          <h1 className="text-4xl font-semibold mb-2" data-testid="text-result-title">
-            Your Menu Designs
-          </h1>
-          <p className="text-muted-foreground text-lg">
-            {generation?.file_name || "Menu"} - Select your favorite design
-          </p>
-        </div>
-
-        {generationLoading ? (
-          <div className="flex items-center justify-center py-24">
-            <div className="text-center">
-              <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
-              <p className="text-muted-foreground">Loading your designs...</p>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="border-b bg-muted/30 shrink-0">
+          <div className="mx-auto max-w-7xl px-6 py-4">
+            <div className="flex items-center justify-between flex-wrap gap-4">
+              <div className="flex items-center gap-4">
+                <Link href="/dashboard">
+                  <Button variant="ghost" size="sm" data-testid="button-back">
+                    <ArrowLeft className="h-4 w-4 mr-2" />
+                    Back
+                  </Button>
+                </Link>
+                <div>
+                  <h1 className="text-xl font-semibold" data-testid="text-result-title">
+                    Edit Your Menu
+                  </h1>
+                  <p className="text-sm text-muted-foreground">
+                    Click on text to edit. Download as PDF when done.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {hasChanges && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReset}
+                    data-testid="button-reset"
+                  >
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Reset
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleSave}
+                  disabled={isSaving || !hasChanges}
+                  data-testid="button-save"
+                >
+                  {isSaving ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  Save Changes
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadHtml}
+                  data-testid="button-download-html"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Download HTML
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={handleDownloadPdf}
+                  disabled={isDownloading}
+                  data-testid="button-download-pdf"
+                >
+                  {isDownloading ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4 mr-2" />
+                  )}
+                  Save as PDF
+                </Button>
+              </div>
             </div>
           </div>
-        ) : htmlVariations.length === 0 ? (
-          <Card className="p-12 text-center">
-            <Loader2 className="h-16 w-16 text-primary animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-medium mb-2">Designs Still Generating</h3>
-            <p className="text-muted-foreground mb-6">
-              Your AI-powered menu designs are being created. This usually takes 30-60 seconds.
-            </p>
-            <Button onClick={() => window.location.reload()}>
-              Refresh Page
-            </Button>
-          </Card>
-        ) : (
-          <>
-            <div className="grid gap-8 md:grid-cols-3 mb-8">
-              {htmlVariations.map((html, index) => (
-                <Card
-                  key={index}
-                  onClick={() => handleSelectVariation(index)}
-                  className={`p-6 hover-elevate cursor-pointer transition-all ${
-                    selectedVariation === index ? 'ring-2 ring-primary' : ''
-                  }`}
-                  data-testid={`card-design-${index}`}
-                >
-                  <div className="aspect-[8.5/11] bg-muted rounded-lg mb-4 overflow-hidden border">
-                    <iframe
-                      srcDoc={html}
-                      className="w-full h-full"
-                      title={`Design ${index + 1}`}
-                      sandbox="allow-same-origin"
-                    />
-                  </div>
-                  <div className="flex items-center justify-between mb-2">
-                    <h3 className="font-medium" data-testid={`text-design-title-${index}`}>
-                      Design Variation {index + 1}
-                    </h3>
-                    {selectedVariation === index && (
-                      <Check className="h-5 w-5 text-primary" data-testid={`icon-selected-${index}`} />
-                    )}
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {selectedVariation === index ? (
-                      <>
-                        {canDownload ? (
-                          <Button
-                            variant="default"
-                            className="w-full"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDownload(index);
-                            }}
-                            disabled={isDownloading}
-                            data-testid={`button-download-${index}`}
-                          >
-                            {isDownloading ? (
-                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                            ) : (
-                              <Download className="h-4 w-4 mr-2" />
-                            )}
-                            Download HTML
-                          </Button>
-                        ) : (
-                          <Link href="/subscribe" className="w-full">
-                            <Button
-                              variant="default"
-                              className="w-full"
-                              data-testid={`button-subscribe-to-download-${index}`}
-                            >
-                              <Sparkles className="h-4 w-4 mr-2" />
-                              Subscribe to Download
-                            </Button>
-                          </Link>
-                        )}
-                      </>
-                    ) : (
-                      <Button
-                        variant="outline"
-                        className="w-full"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSelectVariation(index);
-                        }}
-                        disabled={isSelecting}
-                        data-testid={`button-select-${index}`}
-                      >
-                        {isSelecting ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          "Select This Design"
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </Card>
-              ))}
-            </div>
+        </div>
 
-            <div className="flex justify-center gap-4">
-              <Link href="/generate">
-                <Button variant="outline" size="lg" data-testid="button-generate-new">
-                  Generate New Menu
+        <div className="flex-1 overflow-auto p-6">
+          <div className="mx-auto max-w-4xl">
+            {generationLoading ? (
+              <div className="flex items-center justify-center py-24">
+                <div className="text-center">
+                  <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+                  <p className="text-muted-foreground">Loading your menu...</p>
+                </div>
+              </div>
+            ) : !editedHtml ? (
+              <Card className="p-12 text-center">
+                <Loader2 className="h-16 w-16 text-primary animate-spin mx-auto mb-4" />
+                <h3 className="text-xl font-medium mb-2">Menu Still Generating</h3>
+                <p className="text-muted-foreground mb-6">
+                  Your AI-powered menu design is being created. This usually takes 30-60 seconds.
+                </p>
+                <Button onClick={() => window.location.reload()}>
+                  Refresh Page
                 </Button>
-              </Link>
-              <Link href="/dashboard">
-                <Button variant="ghost" size="lg" data-testid="button-back-dashboard">
-                  Back to Dashboard
-                </Button>
-              </Link>
-            </div>
-          </>
-        )}
+              </Card>
+            ) : (
+              <Card className="overflow-hidden shadow-lg">
+                <div className="bg-white">
+                  <iframe
+                    ref={iframeRef}
+                    className="w-full border-0"
+                    style={{ minHeight: '800px', height: 'auto' }}
+                    title="Menu Preview"
+                    data-testid="iframe-menu-preview"
+                  />
+                </div>
+              </Card>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

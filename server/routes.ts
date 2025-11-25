@@ -555,68 +555,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
   return httpServer;
 }
 
-// Function to generate menu designs with Claude
+// Function to generate a single menu design with Claude
 async function generateMenuDesigns(
   menuText: string,
   colors: string[],
   size: string,
   stylePrompt: string
 ): Promise<string[]> {
-  const htmlDesigns: string[] = [];
-  
   try {
-    const prompts = [
-      `Create a modern, elegant HTML menu design. ${stylePrompt}. Use variation 1 style: Clean and minimalist with subtle elegance.`,
-      `Create a modern, elegant HTML menu design. ${stylePrompt}. Use variation 2 style: Bold and creative with artistic flair.`,
-      `Create a modern, elegant HTML menu design. ${stylePrompt}. Use variation 3 style: Classic and sophisticated with traditional elements.`,
-    ];
-
-    for (let i = 0; i < 3; i++) {
-      const systemPrompt = `You are an expert HTML/CSS designer specializing in restaurant menus. Create a complete, standalone HTML file with embedded CSS that displays a beautiful, professional menu.
+    const systemPrompt = `You are an expert HTML/CSS designer specializing in restaurant menus. Create a complete, standalone HTML file with embedded CSS that displays a beautiful, professional menu.
 
 Requirements:
 - Complete HTML document with <!DOCTYPE html>, proper structure
 - All CSS must be embedded in <style> tags
 - Use the provided color palette: ${colors.join(', ')}
 - Target size: ${size}
-- Make it print-ready if applicable
-- Use elegant typography and proper spacing
+- Make it print-ready with @media print styles
+- Use elegant typography (prefer web-safe fonts or Google Fonts via @import)
+- Use proper spacing and visual hierarchy
 - Organize menu items clearly with sections
-- NO external dependencies, NO JavaScript
-- Professional, restaurant-quality design`;
+- Make text elements easy to identify for editing (use semantic tags like h1, h2, h3, p, span)
+- NO JavaScript
+- Professional, restaurant-quality design
+- Ensure the design looks beautiful when printed as PDF`;
 
-      const userPrompt = `${prompts[i]}
+    const userPrompt = `Create a modern, elegant HTML menu design. ${stylePrompt}
 
 Menu Content:
 ${menuText}
 
-Create a complete HTML file that can be opened directly in a browser and printed if needed. Make it absolutely beautiful and professional.`;
+Create a complete HTML file that can be opened directly in a browser and printed as PDF. Make it absolutely beautiful and professional. The design should be suitable for a real restaurant menu.`;
 
-      const message = await anthropic.messages.create({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 4096,
-        messages: [{
-          role: 'user',
-          content: userPrompt
-        }],
-        system: systemPrompt,
-      });
+    const message = await anthropic.messages.create({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 8192,
+      messages: [{
+        role: 'user',
+        content: userPrompt
+      }],
+      system: systemPrompt,
+    });
 
-      const htmlContent = message.content[0].type === 'text' ? message.content[0].text : '';
-      
-      // Extract HTML if it's wrapped in code blocks
-      let cleanHtml = htmlContent;
-      const htmlMatch = htmlContent.match(/```html\n([\s\S]*?)```/) || htmlContent.match(/```\n([\s\S]*?)```/);
-      if (htmlMatch) {
-        cleanHtml = htmlMatch[1];
-      }
-
-      htmlDesigns.push(cleanHtml);
+    const htmlContent = message.content[0].type === 'text' ? message.content[0].text : '';
+    
+    // Extract HTML if it's wrapped in code blocks
+    let cleanHtml = htmlContent;
+    const htmlMatch = htmlContent.match(/```html\n([\s\S]*?)```/) || htmlContent.match(/```\n([\s\S]*?)```/);
+    if (htmlMatch) {
+      cleanHtml = htmlMatch[1];
     }
 
-    return htmlDesigns;
+    // Return as array with single element for backwards compatibility
+    return [cleanHtml];
   } catch (error) {
-    console.error("Error generating menu designs:", error);
+    console.error("Error generating menu design:", error);
     throw error;
   }
 }
