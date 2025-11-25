@@ -1,131 +1,85 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/useAuth";
+import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
+import { useSubscription, SUBSCRIPTION_REQUIRED } from "@/hooks/useSubscription";
 import { useToast } from "@/hooks/use-toast";
-import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
-import { loadStripe } from '@stripe/stripe-js';
-import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, Check, LogOut, Loader2 } from "lucide-react";
+import { Sparkles, Check, LogOut, ArrowLeft } from "lucide-react";
 import { Link, useLocation } from "wouter";
 
-if (!import.meta.env.VITE_STRIPE_PUBLIC_KEY) {
-  throw new Error('Missing required Stripe key: VITE_STRIPE_PUBLIC_KEY');
-}
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY);
-
-function SubscribeForm() {
-  const stripe = useStripe();
-  const elements = useElements();
-  const { toast } = useToast();
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [, setLocation] = useLocation();
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!stripe || !elements) {
-      return;
-    }
-
-    setIsProcessing(true);
-
-    const { error } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: window.location.origin + "/dashboard",
-      },
-    });
-
-    setIsProcessing(false);
-
-    if (error) {
-      toast({
-        title: "Payment Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    } else {
-      // Invalidate subscription status to reflect new state
-      await queryClient.invalidateQueries({ queryKey: ["/api/subscription/status"] });
-      await queryClient.invalidateQueries({ queryKey: ["/api/auth/user"] });
-      
-      toast({
-        title: "Payment Successful",
-        description: "You are now subscribed!",
-      });
-      
-      // Redirect to dashboard
-      setTimeout(() => {
-        setLocation("/dashboard");
-      }, 1000);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSubmit} className="space-y-6">
-      <PaymentElement />
-      <Button
-        type="submit"
-        disabled={!stripe || isProcessing}
-        className="w-full"
-        size="lg"
-        data-testid="button-submit-payment"
-      >
-        {isProcessing ? (
-          <>
-            <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-            Processing...
-          </>
-        ) : (
-          "Subscribe Now"
-        )}
-      </Button>
-    </form>
-  );
-}
+const FEATURES = [
+  "Unlimited menu downloads",
+  "3 AI-generated design variations per menu",
+  "All menu sizes (A4, Letter, A5, Half-Letter)",
+  "Custom color palettes",
+  "Premium support",
+];
 
 export default function Subscribe() {
   const { toast } = useToast();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const [clientSecret, setClientSecret] = useState("");
+  const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
+  const { hasActiveSubscription, createCheckoutSession, openCustomerPortal, isLoading: subscriptionLoading } = useSubscription();
+  const [, setLocation] = useLocation();
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated && isSupabaseReady) {
       toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
+        title: "Please sign in",
+        description: "Redirecting to home page...",
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        setLocation("/");
       }, 500);
-      return;
     }
-  }, [isAuthenticated, authLoading, toast]);
+  }, [isAuthenticated, isLoading, isSupabaseReady, toast, setLocation]);
 
   useEffect(() => {
-    if (isAuthenticated) {
-      apiRequest("POST", "/api/create-subscription")
-        .then(async (data) => {
-          setClientSecret(data.clientSecret);
-          // Invalidate subscription status immediately after creation
-          // This ensures the development bypass works right away
-          await queryClient.invalidateQueries({ queryKey: ["/api/subscription/status"] });
-          await queryClient.refetchQueries({ queryKey: ["/api/subscription/status"] });
-        })
-        .catch((error) => {
-          toast({
-            title: "Error",
-            description: error.message,
-            variant: "destructive",
-          });
-        });
+    if (!SUBSCRIPTION_REQUIRED) {
+      toast({
+        title: "Free Mode",
+        description: "All features are free! No subscription needed.",
+      });
+      setLocation("/dashboard");
     }
-  }, [isAuthenticated, toast]);
+  }, [toast, setLocation]);
 
-  if (authLoading || !user) {
+  const handleSignOut = async () => {
+    const { error } = await signOut();
+    if (!error) {
+      setLocation("/");
+    }
+  };
+
+  const handleSubscribe = async () => {
+    setIsProcessing(true);
+    const { error } = await createCheckoutSession();
+    setIsProcessing(false);
+    if (error) {
+      toast({
+        title: "Subscription Error",
+        description: error.message || "Could not start subscription process",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    setIsProcessing(true);
+    const { error } = await openCustomerPortal();
+    setIsProcessing(false);
+    if (error) {
+      toast({
+        title: "Portal Error",
+        description: error.message || "Could not open billing portal",
+        variant: "destructive",
+      });
+    }
+  };
+
+  if (isLoading || !isSupabaseReady || subscriptionLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -133,13 +87,23 @@ export default function Subscribe() {
     );
   }
 
+  if (!SUBSCRIPTION_REQUIRED) {
+    return null;
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  const userName = profile?.name || user.user_metadata?.full_name || user.email;
+  const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b bg-background">
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
-            <Link href="/">
+            <Link href="/dashboard">
               <div className="flex items-center gap-2 cursor-pointer">
                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
                   <Sparkles className="h-5 w-5 text-primary-foreground" />
@@ -148,16 +112,26 @@ export default function Subscribe() {
               </div>
             </Link>
             <div className="flex items-center gap-4">
-              <Link href="/">
+              <Link href="/dashboard">
                 <Button variant="ghost" data-testid="button-dashboard">
                   Dashboard
                 </Button>
               </Link>
               <ThemeToggle />
+              <div className="flex items-center gap-2">
+                {userAvatar && (
+                  <img
+                    src={userAvatar}
+                    alt={userName || "User"}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                )}
+                <span className="text-sm font-medium">{userName}</span>
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => window.location.href = "/api/logout"}
+                onClick={handleSignOut}
                 data-testid="button-logout"
               >
                 <LogOut className="h-4 w-4" />
@@ -167,71 +141,79 @@ export default function Subscribe() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-4xl px-6 py-12">
+      <div className="mx-auto max-w-2xl px-6 py-12">
+        <Link href="/dashboard">
+          <Button variant="ghost" className="mb-8" data-testid="button-back">
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Dashboard
+          </Button>
+        </Link>
+
         <div className="text-center mb-12">
           <h1 className="text-4xl font-semibold mb-4" data-testid="text-subscribe-title">
-            Subscribe to Claude Menu Pro
+            {hasActiveSubscription ? "Manage Subscription" : "Upgrade to Pro"}
           </h1>
           <p className="text-xl text-muted-foreground">
-            Unlock unlimited menu generations and premium features
+            {hasActiveSubscription
+              ? "You have an active subscription"
+              : "Unlock unlimited menu downloads"}
           </p>
         </div>
 
-        <div className="grid gap-8 lg:grid-cols-2 mb-12">
-          <Card className="p-8">
-            <div className="text-center mb-6">
-              <h3 className="text-2xl font-semibold mb-2">Pro Plan</h3>
-              <div className="flex items-baseline justify-center gap-2">
-                <span className="text-5xl font-bold">$29</span>
-                <span className="text-muted-foreground">/month</span>
-              </div>
+        <Card className="p-8">
+          <div className="text-center mb-8">
+            <div className="flex items-baseline justify-center gap-1 mb-2">
+              <span className="text-5xl font-bold">$29</span>
+              <span className="text-muted-foreground">/month</span>
             </div>
-            <ul className="space-y-4">
-              <li className="flex items-start gap-3">
-                <Check className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                <span>Unlimited menu generations</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <Check className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                <span>3 AI-designed variations per generation</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <Check className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                <span>Custom color palettes</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <Check className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                <span>Multiple size formats (A4, Letter, Web, etc.)</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <Check className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                <span>Download as HTML</span>
-              </li>
-              <li className="flex items-start gap-3">
-                <Check className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-                <span>Priority support</span>
-              </li>
-            </ul>
-          </Card>
+            <p className="text-muted-foreground">Cancel anytime</p>
+          </div>
 
-          <Card className="p-8">
-            <h3 className="text-xl font-semibold mb-6">Payment Details</h3>
-            {!clientSecret ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-              </div>
-            ) : (
-              <Elements stripe={stripePromise} options={{ clientSecret }}>
-                <SubscribeForm />
-              </Elements>
-            )}
-          </Card>
-        </div>
+          <ul className="space-y-4 mb-8">
+            {FEATURES.map((feature, index) => (
+              <li key={index} className="flex items-center gap-3">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10">
+                  <Check className="h-4 w-4 text-primary" />
+                </div>
+                <span>{feature}</span>
+              </li>
+            ))}
+          </ul>
 
-        <div className="text-center text-sm text-muted-foreground">
-          <p>By subscribing, you agree to our Terms of Service and Privacy Policy.</p>
-          <p className="mt-2">Cancel anytime from your account settings.</p>
-        </div>
+          {hasActiveSubscription ? (
+            <Button
+              size="lg"
+              variant="outline"
+              className="w-full"
+              onClick={handleManageSubscription}
+              disabled={isProcessing}
+              data-testid="button-manage-subscription"
+            >
+              {isProcessing ? "Loading..." : "Manage Subscription"}
+            </Button>
+          ) : (
+            <Button
+              size="lg"
+              className="w-full"
+              onClick={handleSubscribe}
+              disabled={isProcessing}
+              data-testid="button-start-subscription"
+            >
+              {isProcessing ? (
+                "Processing..."
+              ) : (
+                <>
+                  <Sparkles className="h-5 w-5 mr-2" />
+                  Start Subscription
+                </>
+              )}
+            </Button>
+          )}
+        </Card>
+
+        <p className="text-center text-sm text-muted-foreground mt-6">
+          Secure payment powered by Stripe
+        </p>
       </div>
     </div>
   );

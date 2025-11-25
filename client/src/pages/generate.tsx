@@ -1,11 +1,8 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/useAuth";
+import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,13 +11,14 @@ import { Sparkles, Upload, FileText, LogOut, Loader2, X } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useDropzone } from "react-dropzone";
 import { HexColorPicker } from "react-colorful";
-import { MENU_SIZES } from "@shared/schema";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 const DEFAULT_COLORS = ["#1e40af", "#dc2626", "#16a34a", "#eab308"];
+const MENU_SIZES = ["a4", "letter", "a5", "half-letter"] as const;
 
 export default function Generate() {
   const { toast } = useToast();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
   const [, setLocation] = useLocation();
 
   const [file, setFile] = useState<File | null>(null);
@@ -29,86 +27,65 @@ export default function Generate() {
   const [customColorIndex, setCustomColorIndex] = useState<number | null>(null);
   const [size, setSize] = useState("a4");
   const [stylePrompt, setStylePrompt] = useState("");
+  const [isUploading, setIsUploading] = useState(false);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated && isSupabaseReady) {
       toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
+        title: "Please sign in",
+        description: "Redirecting to home page...",
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        setLocation("/");
       }, 500);
-      return;
     }
-  }, [isAuthenticated, authLoading, toast]);
+  }, [isAuthenticated, isLoading, isSupabaseReady, toast, setLocation]);
 
-  // Generation is now free - no subscription check needed
+  const handleSignOut = async () => {
+    const { error } = await signOut();
+    if (!error) {
+      setLocation("/");
+    }
+  };
 
-  const uploadMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const formData = new FormData();
-      formData.append("file", file);
-      const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || "Upload failed");
-      }
-      return response.json();
-    },
-    onSuccess: (data) => {
-      setExtractedText(data.text);
-      toast({
-        title: "Success",
-        description: "File uploaded and text extracted successfully",
-      });
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Upload Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
+  const extractTextFromFile = async (file: File): Promise<string> => {
+    if (!isSupabaseConfigured || !supabase) {
+      throw new Error('Supabase not configured');
+    }
 
-  const generateMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/generate", {
-        fileName: file?.name || "menu.pdf",
-        extractedText,
-        colors,
-        size,
-        stylePrompt,
-      });
-      return response;
-    },
-    onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/generations"] });
-      toast({
-        title: "Success",
-        description: "Your menu designs are ready!",
-      });
-      setLocation(`/result/${data.id}`);
-    },
-    onError: (error: Error) => {
-      toast({
-        title: "Generation Failed",
-        description: error.message,
-        variant: "destructive",
-      });
-    },
-  });
+    const { data, error } = await supabase.functions.invoke('extract-text', {
+      body: { file },
+    });
 
-  const onDrop = (acceptedFiles: File[]) => {
+    if (error) throw error;
+    return data.text;
+  };
+
+  const onDrop = async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       const selectedFile = acceptedFiles[0];
       setFile(selectedFile);
-      uploadMutation.mutate(selectedFile);
+      setIsUploading(true);
+
+      try {
+        const text = await extractTextFromFile(selectedFile);
+        setExtractedText(text);
+        toast({
+          title: "Success",
+          description: "File uploaded and text extracted successfully",
+        });
+      } catch (error: any) {
+        toast({
+          title: "Upload Failed",
+          description: error.message || "Failed to extract text from file",
+          variant: "destructive",
+        });
+        setFile(null);
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -117,6 +94,7 @@ export default function Generate() {
     accept: {
       'application/pdf': ['.pdf'],
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'text/plain': ['.txt'],
     },
     maxFiles: 1,
   });
@@ -127,7 +105,7 @@ export default function Generate() {
     setColors(newColors);
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!extractedText) {
       toast({
         title: "No Content",
@@ -144,10 +122,64 @@ export default function Generate() {
       });
       return;
     }
-    generateMutation.mutate();
+
+    if (!isSupabaseConfigured || !supabase || !user) {
+      toast({
+        title: "Error",
+        description: "Please sign in to generate menus",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsGenerating(true);
+
+    try {
+      const { data: generation, error: insertError } = await supabase
+        .from('menu_generations')
+        .insert({
+          user_id: user.id,
+          file_name: file?.name || "menu.pdf",
+          extracted_text: extractedText,
+          colors,
+          size,
+          style_prompt: stylePrompt,
+        })
+        .select()
+        .single();
+
+      if (insertError) throw insertError;
+
+      const { error: aiError } = await supabase.functions.invoke('generate-menu', {
+        body: {
+          generationId: generation.id,
+          menuText: extractedText,
+          colors,
+          size,
+          stylePrompt,
+        },
+      });
+
+      if (aiError) throw aiError;
+
+      toast({
+        title: "Success",
+        description: "Your menu designs are ready!",
+      });
+      setLocation(`/result/${generation.id}`);
+    } catch (error: any) {
+      console.error('Generation error:', error);
+      toast({
+        title: "Generation Failed",
+        description: error.message || "We encountered an issue generating your menu designs. Please try again later.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
-  if (authLoading || !user) {
+  if (isLoading || !isSupabaseReady) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -155,13 +187,32 @@ export default function Generate() {
     );
   }
 
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Card className="p-8 max-w-md text-center">
+          <h2 className="text-xl font-semibold mb-4">Setup Required</h2>
+          <p className="text-muted-foreground">
+            Please configure Supabase credentials to use this application.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  const userName = profile?.name || user.user_metadata?.full_name || user.email;
+  const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b bg-background">
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
-            <Link href="/">
+            <Link href="/dashboard">
               <div className="flex items-center gap-2 cursor-pointer">
                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
                   <Sparkles className="h-5 w-5 text-primary-foreground" />
@@ -170,16 +221,26 @@ export default function Generate() {
               </div>
             </Link>
             <div className="flex items-center gap-4">
-              <Link href="/">
+              <Link href="/dashboard">
                 <Button variant="ghost" data-testid="button-dashboard">
                   Dashboard
                 </Button>
               </Link>
               <ThemeToggle />
+              <div className="flex items-center gap-2">
+                {userAvatar && (
+                  <img
+                    src={userAvatar}
+                    alt={userName || "User"}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                )}
+                <span className="text-sm font-medium">{userName}</span>
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => window.location.href = "/api/logout"}
+                onClick={handleSignOut}
                 data-testid="button-logout"
               >
                 <LogOut className="h-4 w-4" />
@@ -189,165 +250,141 @@ export default function Generate() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-6 py-12">
-        <h1 className="text-4xl font-semibold mb-8" data-testid="text-generate-title">
-          Generate Menu Design
-        </h1>
+      <div className="mx-auto max-w-4xl px-6 py-12">
+        <div className="mb-8">
+          <h1 className="text-4xl font-semibold mb-2" data-testid="text-generate-title">
+            Generate Menu Design
+          </h1>
+          <p className="text-muted-foreground text-lg">
+            Upload your menu and customize the design options
+          </p>
+        </div>
 
-        <div className="grid gap-8 lg:grid-cols-2">
-          {/* Left Column - Upload and Text Preview */}
-          <div className="space-y-6">
-            <Card className="p-6">
-              <h2 className="text-lg font-medium mb-4">Upload Menu</h2>
-              <div
-                {...getRootProps()}
-                className={`
-                  min-h-[300px] border-2 border-dashed rounded-lg p-8 flex flex-col items-center justify-center cursor-pointer transition-colors
-                  ${isDragActive ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'}
-                `}
-                data-testid="dropzone-upload"
-              >
-                <input {...getInputProps()} data-testid="input-file" />
-                {uploadMutation.isPending ? (
-                  <>
-                    <Loader2 className="h-12 w-12 text-primary animate-spin mb-4" />
-                    <p className="text-sm text-muted-foreground">Uploading and extracting text...</p>
-                  </>
-                ) : file ? (
-                  <>
-                    <FileText className="h-12 w-12 text-primary mb-4" />
-                    <p className="font-medium mb-2" data-testid="text-file-name">{file.name}</p>
-                    <p className="text-sm text-muted-foreground mb-4">Click or drag to replace</p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setFile(null);
-                        setExtractedText("");
-                      }}
-                      data-testid="button-remove-file"
-                    >
-                      <X className="h-4 w-4 mr-2" />
-                      Remove
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Upload className="h-12 w-12 text-muted-foreground mb-4" />
-                    <p className="font-medium mb-2">Drag and drop or click to browse</p>
-                    <p className="text-sm text-muted-foreground">
-                      Supports PDF and DOCX files
-                    </p>
-                  </>
-                )}
-              </div>
-            </Card>
-
-            {extractedText && (
-              <Card className="p-6">
-                <h2 className="text-lg font-medium mb-4">Extracted Text Preview</h2>
-                <Textarea
-                  value={extractedText}
-                  onChange={(e) => setExtractedText(e.target.value)}
-                  className="min-h-[200px] font-mono text-sm"
-                  placeholder="Extracted menu text will appear here..."
-                  data-testid="textarea-extracted-text"
-                />
-                <p className="text-xs text-muted-foreground mt-2">
-                  You can edit the extracted text if needed
-                </p>
-              </Card>
-            )}
-          </div>
-
-          {/* Right Column - Settings */}
-          <div className="space-y-6">
-            <Card className="p-6">
-              <h2 className="text-lg font-medium mb-4">Color Palette</h2>
-              <div className="grid grid-cols-4 gap-4 mb-4">
-                {colors.map((color, index) => (
-                  <div key={index} className="space-y-2">
-                    <button
-                      onClick={() => setCustomColorIndex(customColorIndex === index ? null : index)}
-                      className="w-full h-16 rounded-lg border-2 hover-elevate active-elevate-2 transition-all"
-                      style={{ backgroundColor: color, borderColor: customColorIndex === index ? 'hsl(var(--primary))' : 'hsl(var(--border))' }}
-                      data-testid={`button-color-${index}`}
-                    />
-                    <Input
-                      type="text"
-                      value={color}
-                      onChange={(e) => updateColor(index, e.target.value)}
-                      className="text-xs text-center"
-                      data-testid={`input-color-${index}`}
-                    />
-                  </div>
-                ))}
-              </div>
-              {customColorIndex !== null && (
-                <div className="mt-4">
-                  <HexColorPicker
-                    color={colors[customColorIndex]}
-                    onChange={(newColor) => updateColor(customColorIndex, newColor)}
-                  />
+        <div className="space-y-8">
+          <Card className="p-6">
+            <h2 className="text-xl font-medium mb-4">1. Upload Your Menu</h2>
+            <div
+              {...getRootProps()}
+              className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                isDragActive ? "border-primary bg-primary/5" : "border-muted-foreground/25 hover:border-primary/50"
+              }`}
+              data-testid="dropzone-file-upload"
+            >
+              <input {...getInputProps()} />
+              {isUploading ? (
+                <div className="flex flex-col items-center gap-2">
+                  <Loader2 className="h-12 w-12 text-primary animate-spin" />
+                  <p className="text-muted-foreground">Extracting text...</p>
+                </div>
+              ) : file ? (
+                <div className="flex flex-col items-center gap-2">
+                  <FileText className="h-12 w-12 text-primary" />
+                  <p className="font-medium">{file.name}</p>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setFile(null);
+                      setExtractedText("");
+                    }}
+                  >
+                    <X className="h-4 w-4 mr-1" />
+                    Remove
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center gap-2">
+                  <Upload className="h-12 w-12 text-muted-foreground" />
+                  <p className="text-muted-foreground">
+                    {isDragActive ? "Drop your file here" : "Drag & drop your menu file, or click to browse"}
+                  </p>
+                  <p className="text-sm text-muted-foreground">Supports PDF, DOCX, and TXT files</p>
                 </div>
               )}
-            </Card>
+            </div>
+            {extractedText && (
+              <div className="mt-4">
+                <Label>Extracted Text Preview</Label>
+                <div className="mt-2 p-4 bg-muted rounded-lg max-h-32 overflow-y-auto">
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap line-clamp-4">
+                    {extractedText.substring(0, 500)}...
+                  </p>
+                </div>
+              </div>
+            )}
+          </Card>
 
-            <Card className="p-6">
-              <h2 className="text-lg font-medium mb-4">Menu Size</h2>
-              <Select value={size} onValueChange={setSize}>
-                <SelectTrigger data-testid="select-size">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {MENU_SIZES.map((menuSize) => (
-                    <SelectItem key={menuSize.value} value={menuSize.value}>
-                      {menuSize.label} - {menuSize.dimensions}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </Card>
+          <Card className="p-6">
+            <h2 className="text-xl font-medium mb-4">2. Choose Your Colors</h2>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {colors.map((color, index) => (
+                <div key={index} className="relative">
+                  <button
+                    onClick={() => setCustomColorIndex(customColorIndex === index ? null : index)}
+                    className="w-full aspect-square rounded-lg border-2 transition-all hover:scale-105"
+                    style={{ backgroundColor: color, borderColor: customColorIndex === index ? 'var(--primary)' : 'transparent' }}
+                    data-testid={`button-color-${index}`}
+                  />
+                  {customColorIndex === index && (
+                    <div className="absolute top-full left-0 mt-2 z-10 p-3 bg-background border rounded-lg shadow-lg">
+                      <HexColorPicker color={color} onChange={(newColor) => updateColor(index, newColor)} />
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Card>
 
-            <Card className="p-6">
-              <h2 className="text-lg font-medium mb-4">Style Prompt</h2>
-              <Label htmlFor="style-prompt" className="text-sm text-muted-foreground mb-2 block">
-                Describe how your menu should look
-              </Label>
-              <Textarea
-                id="style-prompt"
-                value={stylePrompt}
-                onChange={(e) => setStylePrompt(e.target.value)}
-                className="min-h-[120px]"
-                placeholder="Example: Modern and elegant with clean typography, ample white space, and sophisticated color scheme. Organize sections clearly with beautiful dividers..."
-                data-testid="textarea-style-prompt"
-              />
-              <p className="text-xs text-muted-foreground mt-2">
-                {stylePrompt.length} / 500 characters
-              </p>
-            </Card>
+          <Card className="p-6">
+            <h2 className="text-xl font-medium mb-4">3. Select Menu Size</h2>
+            <Select value={size} onValueChange={setSize}>
+              <SelectTrigger data-testid="select-size">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {MENU_SIZES.map((sizeOption) => (
+                  <SelectItem key={sizeOption} value={sizeOption}>
+                    {sizeOption.toUpperCase()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Card>
 
-            <Button
-              onClick={handleGenerate}
-              disabled={!extractedText || generateMutation.isPending}
-              className="w-full"
-              size="lg"
-              data-testid="button-generate"
-            >
-              {generateMutation.isPending ? (
-                <>
-                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                  Generating Designs...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-5 w-5 mr-2" />
-                  Generate 3 Designs
-                </>
-              )}
-            </Button>
-          </div>
+          <Card className="p-6">
+            <h2 className="text-xl font-medium mb-4">4. Describe Your Style</h2>
+            <Textarea
+              placeholder="e.g., Modern and elegant with clean lines, rustic Italian trattoria feel, minimalist Japanese aesthetic..."
+              value={stylePrompt}
+              onChange={(e) => setStylePrompt(e.target.value)}
+              className="min-h-24"
+              data-testid="input-style-prompt"
+            />
+          </Card>
+
+          <Button
+            size="lg"
+            className="w-full text-lg py-6"
+            onClick={handleGenerate}
+            disabled={!extractedText || !stylePrompt.trim() || isGenerating}
+            data-testid="button-generate"
+          >
+            {isGenerating ? (
+              <>
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                Generating Designs...
+              </>
+            ) : (
+              <>
+                <Sparkles className="h-5 w-5 mr-2" />
+                Generate Menu Designs
+              </>
+            )}
+          </Button>
+          <p className="text-center text-sm text-muted-foreground">
+            Generation is free! You'll get 3 unique design variations.
+          </p>
         </div>
       </div>
     </div>

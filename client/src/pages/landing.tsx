@@ -1,16 +1,25 @@
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Upload, Sparkles, Download, Palette, ChevronRight } from "lucide-react";
+import { Upload, Sparkles, Download, Palette, ChevronRight, AlertTriangle } from "lucide-react";
 import { SiGoogle } from "react-icons/si";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
+import { isSupabaseConfigured } from "@/lib/supabase";
 import { useToast } from "@/hooks/use-toast";
 
 export default function Landing() {
-  const { signInWithGoogle } = useSupabaseAuth();
+  const { signInWithGoogle, isSupabaseReady } = useSupabaseAuth();
   const { toast } = useToast();
 
   const handleSignIn = async () => {
+    if (!isSupabaseConfigured) {
+      toast({
+        title: "Setup Required",
+        description: "Please configure Supabase credentials first",
+        variant: "destructive",
+      });
+      return;
+    }
     const { error } = await signInWithGoogle();
     if (error) {
       toast({
@@ -21,9 +30,19 @@ export default function Landing() {
     }
   };
 
+  const showSetupBanner = !isSupabaseConfigured;
+
   return (
     <div className="min-h-screen bg-background">
-      <header className="fixed top-0 left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-md">
+      {showSetupBanner && (
+        <div className="fixed top-0 left-0 right-0 z-[60] bg-amber-500 text-amber-950 py-3 px-6">
+          <div className="max-w-7xl mx-auto flex items-center justify-center gap-2 text-sm font-medium">
+            <AlertTriangle className="h-4 w-4" />
+            <span>Setup Required: Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to enable authentication</span>
+          </div>
+        </div>
+      )}
+      <header className={`fixed left-0 right-0 z-50 border-b bg-background/80 backdrop-blur-md ${showSetupBanner ? 'top-12' : 'top-0'}`}>
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -55,7 +74,7 @@ export default function Landing() {
         </div>
       </header>
 
-      <section className="relative pt-32 pb-20 md:pt-40 md:pb-32">
+      <section className={`relative pb-20 md:pb-32 ${showSetupBanner ? 'pt-44 md:pt-52' : 'pt-32 md:pt-40'}`}>
         <div className="mx-auto max-w-7xl px-6">
           <div className="grid gap-12 lg:grid-cols-2 lg:gap-16 items-center">
             <div className="flex flex-col gap-8">

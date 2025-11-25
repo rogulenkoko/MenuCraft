@@ -64,16 +64,28 @@ export function useSupabaseAuth() {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) {
-      setAuthState(prev => ({ ...prev, isLoading: false }));
+      setAuthState({
+        user: null,
+        profile: null,
+        session: null,
+        isLoading: false,
+        isAuthenticated: false,
+        isSupabaseReady: false,
+      });
       return;
     }
+
+    let isMounted = true;
 
     const initAuth = async () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         
+        if (!isMounted) return;
+
         if (session?.user) {
           const profile = await createOrUpdateProfile(session.user);
+          if (!isMounted) return;
           setAuthState({
             user: session.user,
             profile,
@@ -94,6 +106,7 @@ export function useSupabaseAuth() {
         }
       } catch (error) {
         console.error('Auth initialization error:', error);
+        if (!isMounted) return;
         setAuthState({
           user: null,
           profile: null,
@@ -109,8 +122,11 @@ export function useSupabaseAuth() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        if (!isMounted) return;
+        
         if (session?.user) {
           const profile = await createOrUpdateProfile(session.user);
+          if (!isMounted) return;
           setAuthState({
             user: session.user,
             profile,
@@ -133,6 +149,7 @@ export function useSupabaseAuth() {
     );
 
     return () => {
+      isMounted = false;
       subscription.unsubscribe();
     };
   }, [createOrUpdateProfile]);

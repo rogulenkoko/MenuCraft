@@ -1,111 +1,164 @@
 import { useEffect, useState } from "react";
-import { useAuth } from "@/hooks/useAuth";
+import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
+import { useSubscription } from "@/hooks/useSubscription";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, Download, LogOut, Loader2, Check } from "lucide-react";
-import { Link, useRoute } from "wouter";
-import type { MenuGeneration } from "@shared/schema";
+import { Sparkles, Download, Check, LogOut, Loader2, ArrowLeft } from "lucide-react";
+import { Link, useLocation, useParams } from "wouter";
+import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
 
 export default function Result() {
   const { toast } = useToast();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
-  const [, params] = useRoute("/result/:id");
-  const generationId = params?.id;
+  const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
+  const { canDownload, subscriptionRequired, hasActiveSubscription } = useSubscription();
+  const [, setLocation] = useLocation();
+  const params = useParams<{ id: string }>();
+  const generationId = params.id;
+
+  const [generation, setGeneration] = useState<MenuGeneration | null>(null);
+  const [generationLoading, setGenerationLoading] = useState(true);
   const [selectedVariation, setSelectedVariation] = useState<number | null>(null);
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated && isSupabaseReady) {
       toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
+        title: "Please sign in",
+        description: "Redirecting to home page...",
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        setLocation("/");
       }, 500);
-      return;
     }
-  }, [isAuthenticated, authLoading, toast]);
-
-  const { data: generation, isLoading: generationLoading } = useQuery<MenuGeneration>({
-    queryKey: ["/api/generations", generationId],
-    enabled: !!generationId && isAuthenticated,
-  });
-
-  const { data: subscription } = useQuery<{ hasActiveSubscription: boolean; subscriptionRequired: boolean }>({
-    queryKey: ["/api/subscription/status"],
-    enabled: isAuthenticated,
-  });
-
-  const subscriptionRequired = subscription?.subscriptionRequired ?? true;
-  const hasActiveSubscription = subscription?.hasActiveSubscription ?? false;
-  const canDownload = !subscriptionRequired || hasActiveSubscription;
+  }, [isAuthenticated, isLoading, isSupabaseReady, toast, setLocation]);
 
   useEffect(() => {
-    if (generation?.selectedVariation !== null && generation?.selectedVariation !== undefined) {
-      setSelectedVariation(generation.selectedVariation);
-    }
-  }, [generation]);
+    async function fetchGeneration() {
+      if (!isAuthenticated || !isSupabaseConfigured || !supabase || !generationId) {
+        setGenerationLoading(false);
+        return;
+      }
 
-  const selectMutation = useMutation({
-    mutationFn: async (variation: number) => {
-      await apiRequest("POST", `/api/generations/${generationId}/select`, { variation });
-    },
-    onSuccess: (_, variation) => {
-      setSelectedVariation(variation);
-      queryClient.invalidateQueries({ queryKey: ["/api/generations", generationId] });
+      try {
+        const { data, error } = await supabase
+          .from('menu_generations')
+          .select('*')
+          .eq('id', generationId)
+          .single();
+
+        if (error) throw error;
+        setGeneration(data);
+        setSelectedVariation(data.selected_variation);
+      } catch (error) {
+        console.error('Error fetching generation:', error);
+        toast({
+          title: "Error",
+          description: "Could not load menu generation",
+          variant: "destructive",
+        });
+      } finally {
+        setGenerationLoading(false);
+      }
+    }
+
+    if (isAuthenticated) {
+      fetchGeneration();
+    }
+  }, [isAuthenticated, generationId, toast]);
+
+  const handleSignOut = async () => {
+    const { error } = await signOut();
+    if (!error) {
+      setLocation("/");
+    }
+  };
+
+  const handleSelectVariation = async (index: number) => {
+    if (!supabase || !generationId) return;
+    
+    setIsSelecting(true);
+    try {
+      const { error } = await supabase
+        .from('menu_generations')
+        .update({ selected_variation: index })
+        .eq('id', generationId);
+
+      if (error) throw error;
+      setSelectedVariation(index);
       toast({
         title: "Design Selected",
-        description: "You can now download this design",
+        description: `You've selected design variation ${index + 1}`,
       });
-    },
-    onError: (error: Error) => {
+    } catch (error: any) {
       toast({
         title: "Selection Failed",
         description: error.message,
         variant: "destructive",
       });
-    },
-  });
+    } finally {
+      setIsSelecting(false);
+    }
+  };
 
-  const downloadMutation = useMutation({
-    mutationFn: async (variation: number) => {
-      const response = await fetch(`/api/generations/${generationId}/download/${variation}`, {
-        method: "GET",
+  const handleDownload = async (index: number) => {
+    if (!canDownload) {
+      toast({
+        title: "Subscription Required",
+        description: "Please subscribe to download your menu designs",
+        variant: "destructive",
       });
-      if (!response.ok) {
-        throw new Error("Download failed");
-      }
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const a = document.createElement("a");
+      return;
+    }
+
+    if (!generation?.html_variations?.[index]) {
+      toast({
+        title: "Error",
+        description: "Design not found",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsDownloading(true);
+    try {
+      const html = generation.html_variations[index];
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
       a.href = url;
-      a.download = `menu-design-${variation + 1}.html`;
+      a.download = `menu-design-${index + 1}.html`;
       document.body.appendChild(a);
       a.click();
-      window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    },
-    onSuccess: () => {
+      URL.revokeObjectURL(url);
+
+      if (supabase && generationId) {
+        await supabase
+          .from('menu_generations')
+          .update({ is_downloaded: true })
+          .eq('id', generationId);
+      }
+
       toast({
         title: "Download Started",
-        description: "Your menu design is being downloaded",
+        description: "Your menu design is downloading",
       });
-    },
-    onError: (error: Error) => {
+    } catch (error: any) {
       toast({
         title: "Download Failed",
         description: error.message,
         variant: "destructive",
       });
-    },
-  });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
 
-  if (authLoading || !user || generationLoading) {
+  if (isLoading || !isSupabaseReady) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -113,29 +166,33 @@ export default function Result() {
     );
   }
 
-  if (!generation) {
+  if (!isSupabaseConfigured) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <Card className="p-8 text-center">
-          <h2 className="text-xl font-semibold mb-2">Generation Not Found</h2>
-          <p className="text-muted-foreground mb-4">This menu generation doesn't exist</p>
-          <Link href="/">
-            <Button>Back to Dashboard</Button>
-          </Link>
+        <Card className="p-8 max-w-md text-center">
+          <h2 className="text-xl font-semibold mb-4">Setup Required</h2>
+          <p className="text-muted-foreground">
+            Please configure Supabase credentials to use this application.
+          </p>
         </Card>
       </div>
     );
   }
 
-  const htmlDesigns = generation.htmlDesigns || [];
+  if (!user) {
+    return null;
+  }
+
+  const userName = profile?.name || user.user_metadata?.full_name || user.email;
+  const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
+  const htmlVariations = generation?.html_variations || [];
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b bg-background">
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
-            <Link href="/">
+            <Link href="/dashboard">
               <div className="flex items-center gap-2 cursor-pointer">
                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
                   <Sparkles className="h-5 w-5 text-primary-foreground" />
@@ -144,16 +201,26 @@ export default function Result() {
               </div>
             </Link>
             <div className="flex items-center gap-4">
-              <Link href="/">
+              <Link href="/dashboard">
                 <Button variant="ghost" data-testid="button-dashboard">
                   Dashboard
                 </Button>
               </Link>
               <ThemeToggle />
+              <div className="flex items-center gap-2">
+                {userAvatar && (
+                  <img
+                    src={userAvatar}
+                    alt={userName || "User"}
+                    className="h-8 w-8 rounded-full object-cover"
+                  />
+                )}
+                <span className="text-sm font-medium">{userName}</span>
+              </div>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => window.location.href = "/api/logout"}
+                onClick={handleSignOut}
                 data-testid="button-logout"
               >
                 <LogOut className="h-4 w-4" />
@@ -165,28 +232,45 @@ export default function Result() {
 
       <div className="mx-auto max-w-7xl px-6 py-12">
         <div className="mb-8">
+          <Link href="/dashboard">
+            <Button variant="ghost" className="mb-4" data-testid="button-back">
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to Dashboard
+            </Button>
+          </Link>
           <h1 className="text-4xl font-semibold mb-2" data-testid="text-result-title">
             Your Menu Designs
           </h1>
-          <p className="text-muted-foreground">
-            {generation.fileName} • {generation.size}
+          <p className="text-muted-foreground text-lg">
+            {generation?.file_name || "Menu"} - Select your favorite design
           </p>
         </div>
 
-        {htmlDesigns.length === 0 ? (
+        {generationLoading ? (
+          <div className="flex items-center justify-center py-24">
+            <div className="text-center">
+              <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+              <p className="text-muted-foreground">Loading your designs...</p>
+            </div>
+          </div>
+        ) : htmlVariations.length === 0 ? (
           <Card className="p-12 text-center">
             <Loader2 className="h-16 w-16 text-primary animate-spin mx-auto mb-4" />
-            <h3 className="text-xl font-medium mb-2">Generating Designs...</h3>
-            <p className="text-muted-foreground">
-              This usually takes about 30 seconds
+            <h3 className="text-xl font-medium mb-2">Designs Still Generating</h3>
+            <p className="text-muted-foreground mb-6">
+              Your AI-powered menu designs are being created. This usually takes 30-60 seconds.
             </p>
+            <Button onClick={() => window.location.reload()}>
+              Refresh Page
+            </Button>
           </Card>
         ) : (
           <>
-            <div className="grid gap-6 lg:grid-cols-3 mb-8">
-              {htmlDesigns.map((html, index) => (
+            <div className="grid gap-8 md:grid-cols-3 mb-8">
+              {htmlVariations.map((html, index) => (
                 <Card
                   key={index}
+                  onClick={() => handleSelectVariation(index)}
                   className={`p-6 hover-elevate cursor-pointer transition-all ${
                     selectedVariation === index ? 'ring-2 ring-primary' : ''
                   }`}
@@ -215,11 +299,14 @@ export default function Result() {
                           <Button
                             variant="default"
                             className="w-full"
-                            onClick={() => downloadMutation.mutate(index)}
-                            disabled={downloadMutation.isPending}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDownload(index);
+                            }}
+                            disabled={isDownloading}
                             data-testid={`button-download-${index}`}
                           >
-                            {downloadMutation.isPending ? (
+                            {isDownloading ? (
                               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                             ) : (
                               <Download className="h-4 w-4 mr-2" />
@@ -243,11 +330,14 @@ export default function Result() {
                       <Button
                         variant="outline"
                         className="w-full"
-                        onClick={() => selectMutation.mutate(index)}
-                        disabled={selectMutation.isPending}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectVariation(index);
+                        }}
+                        disabled={isSelecting}
                         data-testid={`button-select-${index}`}
                       >
-                        {selectMutation.isPending ? (
+                        {isSelecting ? (
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                         ) : (
                           "Select This Design"
@@ -265,7 +355,7 @@ export default function Result() {
                   Generate New Menu
                 </Button>
               </Link>
-              <Link href="/">
+              <Link href="/dashboard">
                 <Button variant="ghost" size="lg" data-testid="button-back-dashboard">
                   Back to Dashboard
                 </Button>

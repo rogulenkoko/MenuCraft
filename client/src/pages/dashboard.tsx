@@ -1,53 +1,78 @@
-import { useEffect } from "react";
-import { useAuth } from "@/hooks/useAuth";
+import { useEffect, useState } from "react";
+import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
+import { useSubscription } from "@/hooks/useSubscription";
 import { useToast } from "@/hooks/use-toast";
-import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Sparkles, FileText, Clock, LogOut, Plus } from "lucide-react";
-import { Link } from "wouter";
-import type { MenuGeneration, User } from "@shared/schema";
+import { Link, useLocation } from "wouter";
+import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
 import { format } from "date-fns";
 
 export default function Dashboard() {
   const { toast } = useToast();
-  const { user, isAuthenticated, isLoading } = useAuth();
+  const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
+  const { hasActiveSubscription, subscriptionRequired, canDownload } = useSubscription();
+  const [, setLocation] = useLocation();
+
+  const [generations, setGenerations] = useState<MenuGeneration[]>([]);
+  const [generationsLoading, setGenerationsLoading] = useState(true);
 
   useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
+    if (!isLoading && !isAuthenticated && isSupabaseReady) {
       toast({
-        title: "Unauthorized",
-        description: "You are logged out. Logging in again...",
+        title: "Please sign in",
+        description: "Redirecting to home page...",
         variant: "destructive",
       });
       setTimeout(() => {
-        window.location.href = "/api/login";
+        setLocation("/");
       }, 500);
-      return;
     }
-  }, [isAuthenticated, isLoading, toast]);
+  }, [isAuthenticated, isLoading, isSupabaseReady, toast, setLocation]);
 
-  const { data: generations = [], isLoading: generationsLoading } = useQuery<MenuGeneration[]>({
-    queryKey: ["/api/generations"],
-    enabled: isAuthenticated,
-  });
-
-  const { data: subscription, refetch: refetchSubscription } = useQuery<{ hasActiveSubscription: boolean; isDevelopmentBypass?: boolean; subscriptionRequired: boolean }>({
-    queryKey: ["/api/subscription/status"],
-    enabled: isAuthenticated,
-  });
-
-  // Refetch subscription status when component mounts to ensure fresh data
   useEffect(() => {
-    if (isAuthenticated) {
-      refetchSubscription();
+    async function fetchGenerations() {
+      if (!isAuthenticated || !isSupabaseConfigured || !supabase) {
+        setGenerationsLoading(false);
+        return;
+      }
+
+      try {
+        const { data, error } = await supabase
+          .from('menu_generations')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (error) throw error;
+        setGenerations(data || []);
+      } catch (error) {
+        console.error('Error fetching generations:', error);
+      } finally {
+        setGenerationsLoading(false);
+      }
     }
-  }, [isAuthenticated, refetchSubscription]);
 
-  const subscriptionRequired = subscription?.subscriptionRequired ?? true;
+    if (isAuthenticated) {
+      fetchGenerations();
+    }
+  }, [isAuthenticated]);
 
-  if (isLoading || !user) {
+  const handleSignOut = async () => {
+    const { error } = await signOut();
+    if (error) {
+      toast({
+        title: "Sign out failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } else {
+      setLocation("/");
+    }
+  };
+
+  if (isLoading || !isSupabaseReady) {
     return (
       <div className="flex h-screen items-center justify-center">
         <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
@@ -55,11 +80,28 @@ export default function Dashboard() {
     );
   }
 
-  const hasActiveSubscription = subscription?.hasActiveSubscription ?? false;
+  if (!isSupabaseConfigured) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Card className="p-8 max-w-md text-center">
+          <h2 className="text-xl font-semibold mb-4">Setup Required</h2>
+          <p className="text-muted-foreground">
+            Please configure Supabase credentials (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY) to use this application.
+          </p>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return null;
+  }
+
+  const userName = profile?.name || user.user_metadata?.full_name || user.email;
+  const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b bg-background">
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
@@ -72,22 +114,22 @@ export default function Dashboard() {
             <div className="flex items-center gap-4">
               <ThemeToggle />
               <div className="flex items-center gap-2">
-                {user.profileImageUrl && (
+                {userAvatar && (
                   <img
-                    src={user.profileImageUrl}
-                    alt={user.firstName || "User"}
+                    src={userAvatar}
+                    alt={userName || "User"}
                     className="h-8 w-8 rounded-full object-cover"
                     data-testid="img-user-avatar"
                   />
                 )}
                 <span className="text-sm font-medium" data-testid="text-user-name">
-                  {user.firstName || user.email}
+                  {userName}
                 </span>
               </div>
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => window.location.href = "/api/logout"}
+                onClick={handleSignOut}
                 data-testid="button-logout"
               >
                 <LogOut className="h-4 w-4" />
@@ -98,7 +140,6 @@ export default function Dashboard() {
       </header>
 
       <div className="mx-auto max-w-7xl px-6 py-12">
-        {/* Stats Overview */}
         <div className="mb-12">
           <h1 className="text-4xl font-semibold mb-8" data-testid="text-dashboard-title">
             Dashboard
@@ -119,7 +160,7 @@ export default function Dashboard() {
                 <Clock className="h-4 w-4 text-muted-foreground" />
               </div>
               <div className="text-xl font-semibold" data-testid="text-subscription-status">
-                {hasActiveSubscription ? "Active" : "Free"}
+                {!subscriptionRequired ? "Free" : hasActiveSubscription ? "Active" : "Free"}
               </div>
             </Card>
             <Card className="p-6">
@@ -143,7 +184,6 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Recent Generations */}
         <div>
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-semibold" data-testid="text-recent-title">
@@ -184,43 +224,42 @@ export default function Dashboard() {
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {generations.map((generation) => (
-                <Card
-                  key={generation.id}
-                  className="p-6 hover-elevate cursor-pointer"
-                  onClick={() => window.location.href = `/result/${generation.id}`}
-                  data-testid={`card-generation-${generation.id}`}
-                >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
-                      <h3 className="font-medium mb-1 line-clamp-1" data-testid={`text-menu-name-${generation.id}`}>
-                        {generation.fileName}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">
-                        {generation.createdAt && format(new Date(generation.createdAt), "MMM d, yyyy")}
-                      </p>
+                <Link key={generation.id} href={`/result/${generation.id}`}>
+                  <Card
+                    className="p-6 hover-elevate cursor-pointer"
+                    data-testid={`card-generation-${generation.id}`}
+                  >
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="flex-1">
+                        <h3 className="font-medium mb-1 line-clamp-1" data-testid={`text-menu-name-${generation.id}`}>
+                          {generation.file_name}
+                        </h3>
+                        <p className="text-sm text-muted-foreground">
+                          {generation.created_at && format(new Date(generation.created_at), "MMM d, yyyy")}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm">
-                    <span className="px-2 py-1 rounded-md bg-muted text-muted-foreground">
-                      {generation.size}
-                    </span>
-                    <span className="text-muted-foreground">
-                      {generation.colors?.length || 0} colors
-                    </span>
-                  </div>
-                </Card>
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="px-2 py-1 rounded-md bg-muted text-muted-foreground">
+                        {generation.size}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {generation.colors?.length || 0} colors
+                      </span>
+                    </div>
+                  </Card>
+                </Link>
               ))}
             </div>
           )}
         </div>
 
-        {/* Subscription Info */}
-        {!hasActiveSubscription && (
+        {subscriptionRequired && !hasActiveSubscription && (
           <Card className="mt-12 p-8 bg-primary/5 border-primary/20">
             <div className="text-center max-w-2xl mx-auto">
               <h3 className="text-2xl font-semibold mb-2">Upgrade to Pro</h3>
               <p className="text-muted-foreground mb-6">
-                Subscribe to unlock unlimited menu generations and premium features
+                Subscribe to unlock unlimited menu downloads and premium features
               </p>
               <Link href="/subscribe">
                 <Button size="lg" data-testid="button-upgrade-pro">
