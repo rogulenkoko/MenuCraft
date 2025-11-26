@@ -18,7 +18,10 @@ import {
   Loader2,
   Calendar,
   ChevronRight,
-  Coins
+  ChevronLeft,
+  Coins,
+  Menu,
+  X
 } from "lucide-react";
 import { Link, useLocation, useParams, useSearch } from "wouter";
 import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
@@ -53,6 +56,7 @@ export default function Dashboard() {
   const [selectedId, setSelectedId] = useState<string | null>(params.id || null);
   const [editedHtml, setEditedHtml] = useState<string>("");
   const [originalHtml, setOriginalHtml] = useState<string>("");
+  const [mobileView, setMobileView] = useState<'list' | 'editor'>('list');
   const [isSaving, setIsSaving] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -237,6 +241,12 @@ export default function Dashboard() {
       // Update URL without triggering navigation
       window.history.replaceState({}, '', `/dashboard/${id}`);
     }
+    // Switch to editor view on mobile when a menu is selected
+    setMobileView('editor');
+  };
+
+  const handleBackToList = () => {
+    setMobileView('list');
   };
 
   const handleSave = async () => {
@@ -443,8 +453,8 @@ export default function Dashboard() {
 
       {/* Main content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left sidebar - Menu list */}
-        <div className="w-64 lg:w-80 border-r bg-muted/30 flex flex-col shrink-0">
+        {/* Left sidebar - Menu list (hidden on mobile when viewing editor) */}
+        <div className={`${mobileView === 'list' ? 'flex' : 'hidden'} lg:flex w-full lg:w-64 xl:w-80 border-r bg-muted/30 flex-col shrink-0`}>
           <div className="p-4 border-b">
             <h2 className="font-semibold text-lg" data-testid="text-my-menus-title">My Menus</h2>
             <p className="text-sm text-muted-foreground">{generations.length} menu{generations.length !== 1 ? 's' : ''}</p>
@@ -460,6 +470,12 @@ export default function Dashboard() {
                 <div className="text-center py-8 px-4">
                   <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
                   <p className="text-sm text-muted-foreground">No menus yet</p>
+                  <Link href="/">
+                    <Button variant="outline" size="sm" className="mt-4">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Create your first menu
+                    </Button>
+                  </Link>
                 </div>
               ) : (
                 <div className="space-y-1">
@@ -486,8 +502,9 @@ export default function Dashboard() {
                             </span>
                           </div>
                         </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5 lg:hidden" />
                         {selectedId === generation.id && (
-                          <ChevronRight className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                          <ChevronRight className="h-4 w-4 text-primary shrink-0 mt-0.5 hidden lg:block" />
                         )}
                       </div>
                     </button>
@@ -499,36 +516,90 @@ export default function Dashboard() {
 
         </div>
 
-        {/* Right side - Menu editor */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Right side - Menu editor (full width on mobile) */}
+        <div className={`${mobileView === 'editor' ? 'flex' : 'hidden'} lg:flex flex-1 flex-col overflow-hidden`}>
           {/* Editor toolbar */}
           <div className="border-b bg-background shrink-0">
             <div className="px-4 py-3">
-              <div className="flex items-center justify-between gap-4 flex-wrap">
-                <div className="min-w-0">
-                  <h1 className="text-lg font-semibold truncate" data-testid="text-menu-title">
-                    {selectedGeneration?.file_name || 'Select a menu'}
-                  </h1>
-                  <p className="text-sm text-muted-foreground">
-                    Click on text in the preview to edit
-                  </p>
+              <div className="flex items-center justify-between gap-2 sm:gap-4">
+                <div className="flex items-center gap-2 min-w-0">
+                  {/* Back button for mobile */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleBackToList}
+                    className="lg:hidden shrink-0"
+                    data-testid="button-back-to-list"
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                  <div className="min-w-0">
+                    <h1 className="text-base sm:text-lg font-semibold truncate" data-testid="text-menu-title">
+                      {selectedGeneration?.file_name || 'Select a menu'}
+                    </h1>
+                    <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">
+                      Click on text in the preview to edit
+                    </p>
+                  </div>
                 </div>
                 
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
+                  {/* Reset button - icon only on mobile */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={handleReset}
+                        className="sm:hidden"
+                        data-testid="button-reset-mobile"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Reset changes</p>
+                    </TooltipContent>
+                  </Tooltip>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleReset}
+                    className="hidden sm:flex"
                     data-testid="button-reset"
                   >
                     <RotateCcw className="h-4 w-4 mr-2" />
                     Reset
                   </Button>
+                  
+                  {/* Save button - icon only on mobile */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={handleSave}
+                        disabled={isSaving}
+                        className="sm:hidden"
+                        data-testid="button-save-mobile"
+                      >
+                        {isSaving ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Save className="h-4 w-4" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Save changes</p>
+                    </TooltipContent>
+                  </Tooltip>
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={handleSave}
                     disabled={isSaving}
+                    className="hidden sm:flex"
                     data-testid="button-save"
                   >
                     {isSaving ? (
@@ -538,6 +609,8 @@ export default function Dashboard() {
                     )}
                     Save
                   </Button>
+                  
+                  {/* Download HTML button */}
                   {paymentRequired && !canDownload ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -546,6 +619,7 @@ export default function Dashboard() {
                             variant="outline"
                             size="sm"
                             disabled
+                            className="hidden sm:flex"
                             data-testid="button-download-html"
                           >
                             <Download className="h-4 w-4 mr-2" />
@@ -562,44 +636,90 @@ export default function Dashboard() {
                       variant="outline"
                       size="sm"
                       onClick={handleDownloadHtml}
+                      className="hidden sm:flex"
                       data-testid="button-download-html"
                     >
                       <Download className="h-4 w-4 mr-2" />
                       HTML
                     </Button>
                   )}
+                  
+                  {/* Download PDF button */}
                   {paymentRequired && !canDownload ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span>
-                          <Button
-                            size="sm"
-                            disabled
-                            data-testid="button-download-pdf"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            PDF
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Activate to download</p>
-                      </TooltipContent>
-                    </Tooltip>
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span>
+                            <Button
+                              size="icon"
+                              disabled
+                              className="sm:hidden"
+                              data-testid="button-download-pdf-mobile"
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Activate to download</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span>
+                            <Button
+                              size="sm"
+                              disabled
+                              className="hidden sm:flex"
+                              data-testid="button-download-pdf"
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              PDF
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Activate to download</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </>
                   ) : (
-                    <Button
-                      size="sm"
-                      onClick={handleDownloadPdf}
-                      disabled={isDownloading}
-                      data-testid="button-download-pdf"
-                    >
-                      {isDownloading ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      ) : (
-                        <Download className="h-4 w-4 mr-2" />
-                      )}
-                      PDF
-                    </Button>
+                    <>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            size="icon"
+                            onClick={handleDownloadPdf}
+                            disabled={isDownloading}
+                            className="sm:hidden"
+                            data-testid="button-download-pdf-mobile"
+                          >
+                            {isDownloading ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Download className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Download as PDF</p>
+                        </TooltipContent>
+                      </Tooltip>
+                      <Button
+                        size="sm"
+                        onClick={handleDownloadPdf}
+                        disabled={isDownloading}
+                        className="hidden sm:flex"
+                        data-testid="button-download-pdf"
+                      >
+                        {isDownloading ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <Download className="h-4 w-4 mr-2" />
+                        )}
+                        PDF
+                      </Button>
+                    </>
                   )}
                 </div>
               </div>
@@ -607,28 +727,38 @@ export default function Dashboard() {
           </div>
 
           {/* Menu preview/editor */}
-          <div className="flex-1 overflow-auto p-4 bg-muted/20">
+          <div className="flex-1 overflow-auto p-2 sm:p-4 bg-muted/20">
             <div className="max-w-4xl mx-auto">
               {generationsLoading ? (
-                <div className="flex items-center justify-center py-24">
+                <div className="flex items-center justify-center py-12 sm:py-24">
                   <div className="text-center">
-                    <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+                    <Loader2 className="h-10 w-10 sm:h-12 sm:w-12 animate-spin text-primary mx-auto mb-4" />
                     <p className="text-muted-foreground">Loading your menus...</p>
                   </div>
                 </div>
               ) : !selectedId ? (
-                <Card className="p-12 text-center">
-                  <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-xl font-medium mb-2">Select a Menu</h3>
-                  <p className="text-muted-foreground">
-                    Choose a menu from the list to view and edit
+                <Card className="p-6 sm:p-12 text-center">
+                  <FileText className="h-12 w-12 sm:h-16 sm:w-16 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg sm:text-xl font-medium mb-2">Select a Menu</h3>
+                  <p className="text-sm sm:text-base text-muted-foreground mb-4">
+                    <span className="hidden lg:inline">Choose a menu from the list to view and edit</span>
+                    <span className="lg:hidden">Use the back button to see your menu list</span>
                   </p>
+                  <Button
+                    variant="outline"
+                    onClick={handleBackToList}
+                    className="lg:hidden"
+                    data-testid="button-view-menus"
+                  >
+                    <ChevronLeft className="h-4 w-4 mr-2" />
+                    View My Menus
+                  </Button>
                 </Card>
               ) : !editedHtml ? (
-                <Card className="p-12 text-center">
-                  <Loader2 className="h-16 w-16 text-primary animate-spin mx-auto mb-4" />
-                  <h3 className="text-xl font-medium mb-2">Loading Menu</h3>
-                  <p className="text-muted-foreground">
+                <Card className="p-6 sm:p-12 text-center">
+                  <Loader2 className="h-12 w-12 sm:h-16 sm:w-16 text-primary animate-spin mx-auto mb-4" />
+                  <h3 className="text-lg sm:text-xl font-medium mb-2">Loading Menu</h3>
+                  <p className="text-sm sm:text-base text-muted-foreground">
                     Please wait while we load your menu design...
                   </p>
                 </Card>
@@ -638,7 +768,7 @@ export default function Dashboard() {
                     <iframe
                       ref={iframeRef}
                       className="w-full border-0"
-                      style={{ minHeight: '800px', height: 'auto' }}
+                      style={{ minHeight: '600px', height: 'auto' }}
                       title="Menu Preview"
                       sandbox="allow-same-origin"
                       data-testid="iframe-menu-preview"
