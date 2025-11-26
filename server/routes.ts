@@ -1,9 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { setupAuth, isAuthenticated } from "./replitAuth";
+import { supabaseStorage } from "./supabaseStorage";
 import { verifySupabaseToken } from "./supabaseAuth";
-import { updateSupabaseProfile } from "./supabaseAdmin";
 import Stripe from "stripe";
 import Anthropic from '@anthropic-ai/sdk';
 import multer from "multer";
@@ -79,39 +77,22 @@ function isSubscriptionRequired(): boolean {
 }
 
 // Helper to check if user has active subscription (with development bypass support)
-async function ensureActiveSubscription(userId: string): Promise<{ hasAccess: boolean; user: any }> {
-  // If subscription is not required, grant access to everyone without checking user status
+async function ensureActiveSubscription(userId: string): Promise<{ hasAccess: boolean; profile: any }> {
+  // If subscription is not required, grant access to everyone
   if (!isSubscriptionRequired()) {
-    const user = await storage.getUser(userId);
-    return { hasAccess: true, user };
+    const profile = await supabaseStorage.getProfile(userId);
+    return { hasAccess: true, profile };
   }
   
-  let user = await storage.getUser(userId);
+  let profile = await supabaseStorage.getProfile(userId);
   
-  if (!user) {
-    return { hasAccess: false, user: null };
-  }
-  
-  // Check if development bypass should apply
-  const enableDevBypass = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
-  const isDevMode = process.env.NODE_ENV === 'development';
-  const isDevelopmentBypass = enableDevBypass && isDevMode && !process.env.STRIPE_WEBHOOK_SECRET;
-  
-  // If bypass applies and user has subscription, ensure status is active
-  if (isDevelopmentBypass && user.stripeSubscriptionId && user.subscriptionStatus !== 'active') {
-    console.log(`Development bypass: Activating subscription for user ${userId}`);
-    await storage.updateUserStripeInfo(
-      userId,
-      user.stripeCustomerId || '',
-      user.stripeSubscriptionId,
-      'active'
-    );
-    user = await storage.getUser(userId); // Refetch
+  if (!profile) {
+    return { hasAccess: false, profile: null };
   }
   
   return {
-    hasAccess: user.subscriptionStatus === 'active',
-    user
+    hasAccess: profile.subscription_status === 'active',
+    profile
   };
 }
 
@@ -132,16 +113,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   if (bypassEnabled) {
     console.warn('⚠️  Development subscription bypass is ENABLED. This should NEVER be used in production!');
   }
-  
-  // Auth middleware
-  await setupAuth(app);
 
-  // Auth routes
-  app.get('/api/auth/user', isAuthenticated, async (req: any, res) => {
+  // Auth routes - Now uses Supabase auth (verified via verifySupabaseToken middleware)
+  app.get('/api/auth/user', verifySupabaseToken, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const user = await storage.getUser(userId);
-      res.json(user);
+      const userId = req.supabaseUser.id;
+      const profile = await supabaseStorage.getProfile(userId);
+      res.json(profile);
     } catch (error) {
       console.error("Error fetching user:", error);
       res.status(500).json({ message: "Failed to fetch user" });
@@ -155,10 +133,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
-  // Subscription status route
-  app.get('/api/subscription/status', isAuthenticated, async (req: any, res) => {
+  // Subscription status route - uses Supabase auth
+  app.get('/api/subscription/status', verifySupabaseToken, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.supabaseUser.id;
       const { hasAccess } = await ensureActiveSubscription(userId);
       
       const enableDevBypass = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
@@ -247,19 +225,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create subscription route
-  app.post('/api/create-subscription', isAuthenticated, async (req: any, res) => {
+  // Create subscription route - uses Supabase auth
+  app.post('/api/create-subscription', verifySupabaseToken, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      let user = await storage.getUser(userId);
+      const userId = req.supabaseUser.id;
+      let profile = await supabaseStorage.getProfile(userId);
 
-      if (!user) {
+      if (!profile) {
         return res.status(404).json({ message: "User not found" });
       }
 
       // If user already has active subscription, return existing
-      if (user.stripeSubscriptionId && user.subscriptionStatus === 'active') {
-        const subscription = await stripe.subscriptions.retrieve(user.stripeSubscriptionId);
+      if (profile.stripe_subscription_id && profile.subscription_status === 'active') {
+        const subscription = await stripe.subscriptions.retrieve(profile.stripe_subscription_id);
         const invoice = await stripe.invoices.retrieve(subscription.latest_invoice as string);
         const paymentIntent = await stripe.paymentIntents.retrieve(invoice.payment_intent as string);
         
@@ -270,11 +248,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Create or retrieve Stripe customer
-      let customerId = user.stripeCustomerId;
+      let customerId = profile.stripe_customer_id;
       if (!customerId) {
         const customer = await stripe.customers.create({
-          email: user.email || undefined,
-          name: user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.firstName || undefined,
+          email: profile.email || undefined,
+          name: profile.name || undefined,
           metadata: {
             userId: userId,
           },
@@ -299,8 +277,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Determine initial subscription status
-      // In development with bypass enabled, set to 'active' immediately for testing
-      // Otherwise, use Stripe's status (typically 'incomplete' until webhook confirms payment)
       const enableDevBypass = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
       const isDevMode = process.env.NODE_ENV === 'development';
       const isDevelopmentBypass = enableDevBypass && isDevMode && !process.env.STRIPE_WEBHOOK_SECRET;
@@ -311,13 +287,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`Development bypass: Creating subscription with immediate 'active' status for user ${userId}`);
       }
       
-      // Update user with Stripe info
-      await storage.updateUserStripeInfo(
-        userId,
-        customerId,
-        subscription.id,
-        initialStatus
-      );
+      // Update profile with Stripe info
+      if (profile.email) {
+        await supabaseStorage.updateProfileStripeInfo(
+          profile.email,
+          customerId,
+          subscription.id,
+          initialStatus
+        );
+      }
 
       const invoice = subscription.latest_invoice as Stripe.Invoice;
       const paymentIntent = invoice?.payment_intent as Stripe.PaymentIntent | null;
@@ -371,7 +349,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Handle the event
+    // Handle the event - update Supabase profiles only
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
@@ -382,7 +360,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`Checkout completed for ${customerEmail}, subscription: ${subscriptionId}`);
         
         if (customerEmail && subscriptionId) {
-          await updateSupabaseProfile(customerEmail, customerId, subscriptionId, 'active');
+          await supabaseStorage.updateProfileStripeInfo(customerEmail, customerId, subscriptionId, 'active');
         }
         break;
       }
@@ -396,17 +374,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const customerEmail = (customer as Stripe.Customer).email;
         
         if (customerEmail) {
-          await updateSupabaseProfile(customerEmail, customerId, subscription.id, subscription.status);
-        }
-        
-        const users = await storage.getUserByStripeCustomer(customerId);
-        if (users) {
-          await storage.updateUserStripeInfo(
-            users.id,
-            customerId,
-            subscription.id,
-            subscription.status
-          );
+          await supabaseStorage.updateProfileStripeInfo(customerEmail, customerId, subscription.id, subscription.status);
         }
         break;
       }
@@ -419,17 +387,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const deletedEmail = (deletedCustomer as Stripe.Customer).email;
         
         if (deletedEmail) {
-          await updateSupabaseProfile(deletedEmail, deletedCustomerId, deletedSubscription.id, 'canceled');
-        }
-        
-        const deletedUsers = await storage.getUserByStripeCustomer(deletedCustomerId);
-        if (deletedUsers) {
-          await storage.updateUserStripeInfo(
-            deletedUsers.id,
-            deletedCustomerId,
-            deletedSubscription.id,
-            'canceled'
-          );
+          await supabaseStorage.updateProfileStripeInfo(deletedEmail, deletedCustomerId, deletedSubscription.id, 'canceled');
         }
         break;
       }
@@ -446,17 +404,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const invoiceEmail = (invoiceCustomer as Stripe.Customer).email;
           
           if (invoiceEmail) {
-            await updateSupabaseProfile(invoiceEmail, invoiceCustomerId, subscriptionId, 'active');
-          }
-          
-          const invoiceUsers = await storage.getUserByStripeCustomer(invoiceCustomerId);
-          if (invoiceUsers) {
-            await storage.updateUserStripeInfo(
-              invoiceUsers.id,
-              invoiceCustomerId,
-              subscriptionId,
-              'active'
-            );
+            await supabaseStorage.updateProfileStripeInfo(invoiceEmail, invoiceCustomerId, subscriptionId, 'active');
           }
         }
         break;
@@ -566,11 +514,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get user's generations
-  app.get('/api/generations', isAuthenticated, async (req: any, res) => {
+  // Get user's generations - uses Supabase auth
+  app.get('/api/generations', verifySupabaseToken, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const generations = await storage.getUserGenerations(userId);
+      const userId = req.supabaseUser.id;
+      const generations = await supabaseStorage.getUserGenerations(userId);
       res.json(generations);
     } catch (error) {
       console.error("Error fetching generations:", error);
@@ -578,17 +526,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get specific generation
-  app.get('/api/generations/:id', isAuthenticated, async (req: any, res) => {
+  // Get specific generation - uses Supabase auth
+  app.get('/api/generations/:id', verifySupabaseToken, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const generation = await storage.getMenuGeneration(req.params.id);
+      const userId = req.supabaseUser.id;
+      const generation = await supabaseStorage.getMenuGeneration(req.params.id);
 
       if (!generation) {
         return res.status(404).json({ message: "Generation not found" });
       }
 
-      if (generation.userId !== userId) {
+      if (generation.user_id !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
 
@@ -599,17 +547,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Select variation
-  app.post('/api/generations/:id/select', isAuthenticated, async (req: any, res) => {
+  // Select variation - uses Supabase auth
+  app.post('/api/generations/:id/select', verifySupabaseToken, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
-      const generation = await storage.getMenuGeneration(req.params.id);
+      const userId = req.supabaseUser.id;
+      const generation = await supabaseStorage.getMenuGeneration(req.params.id);
 
       if (!generation) {
         return res.status(404).json({ message: "Generation not found" });
       }
 
-      if (generation.userId !== userId) {
+      if (generation.user_id !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
 
@@ -618,7 +566,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid variation" });
       }
 
-      await storage.selectGenerationVariation(req.params.id, variation);
+      await supabaseStorage.selectGenerationVariation(req.params.id, variation);
       res.json({ success: true });
     } catch (error) {
       console.error("Error selecting variation:", error);
@@ -626,10 +574,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Download HTML (requires subscription if SUBSCRIPTION_REQUIRED=true)
-  app.get('/api/generations/:id/download/:variation', isAuthenticated, async (req: any, res) => {
+  // Download HTML (requires subscription if SUBSCRIPTION_REQUIRED=true) - uses Supabase auth
+  app.get('/api/generations/:id/download/:variation', verifySupabaseToken, async (req: any, res) => {
     try {
-      const userId = req.user.claims.sub;
+      const userId = req.supabaseUser.id;
       
       // Check subscription if required
       if (isSubscriptionRequired()) {
@@ -639,13 +587,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       
-      const generation = await storage.getMenuGeneration(req.params.id);
+      const generation = await supabaseStorage.getMenuGeneration(req.params.id);
 
       if (!generation) {
         return res.status(404).json({ message: "Generation not found" });
       }
 
-      if (generation.userId !== userId) {
+      if (generation.user_id !== userId) {
         return res.status(403).json({ message: "Access denied" });
       }
 
@@ -654,11 +602,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid variation" });
       }
 
-      if (!generation.htmlDesigns || !generation.htmlDesigns[variation]) {
+      if (!generation.html_variations || !generation.html_variations[variation]) {
         return res.status(404).json({ message: "Design not found" });
       }
 
-      const html = generation.htmlDesigns[variation];
+      const html = generation.html_variations[variation];
       res.setHeader('Content-Type', 'text/html');
       res.setHeader('Content-Disposition', `attachment; filename="menu-design-${variation + 1}.html"`);
       res.send(html);
