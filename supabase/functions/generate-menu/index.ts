@@ -68,7 +68,7 @@ serve(async (req) => {
       ];
 
       const prompt = `You are an expert menu designer. Create a beautiful, professional HTML menu design.
-
+ 
 MENU CONTENT:
 ${menuText}
 

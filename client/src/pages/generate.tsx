@@ -7,31 +7,29 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type, ChevronLeft, SkipForward, Check } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useDropzone } from "react-dropzone";
-import { HexColorPicker } from "react-colorful";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 const THEME_PRESETS = [
-  { id: "minimalism", name: "Minimalism", icon: "✨", description: "Clean, simple, elegant" },
-  { id: "scandinavian", name: "Scandinavian", icon: "🌿", description: "Light, airy, natural" },
-  { id: "loft", name: "Loft / Industrial", icon: "🏭", description: "Raw, urban, modern" },
-  { id: "neon", name: "Neon Retrowave", icon: "🎮", description: "Bold, vibrant, 80s style" },
-  { id: "japanese", name: "Japanese Zen", icon: "🎋", description: "Peaceful, balanced, refined" },
-  { id: "greek", name: "Greek Tavern", icon: "🏛️", description: "Mediterranean, warm, rustic" },
-  { id: "fine-dining", name: "Classic Fine Dining", icon: "🍷", description: "Luxurious, sophisticated" },
-  { id: "eco", name: "Eco / Organic", icon: "🌱", description: "Green, sustainable, fresh" },
+  { id: "minimalism", name: "Minimalism", description: "Clean, simple, elegant" },
+  { id: "scandinavian", name: "Scandinavian", description: "Light, airy, natural" },
+  { id: "loft", name: "Loft / Industrial", description: "Raw, urban, modern" },
+  { id: "neon", name: "Neon Retrowave", description: "Bold, vibrant, 80s style" },
+  { id: "japanese", name: "Japanese Zen", description: "Peaceful, balanced, refined" },
+  { id: "greek", name: "Greek Tavern", description: "Mediterranean, warm, rustic" },
+  { id: "fine-dining", name: "Classic Fine Dining", description: "Luxurious, sophisticated" },
+  { id: "eco", name: "Eco / Organic", description: "Green, sustainable, fresh" },
 ];
 
 const COLOR_PALETTES = [
-  { id: "natural", name: "Natural / Earthy", icon: "🍃", colors: ["#6B705C", "#A5A58D", "#B7B7A4"] },
-  { id: "coffee", name: "Coffeehouse", icon: "☕", colors: ["#4E3629", "#D9CAB3", "#F5ECE3"] },
-  { id: "japanese-minimal", name: "Japanese Minimal", icon: "🍣", colors: ["#000000", "#F2F2F2", "#D72638"] },
-  { id: "vintage-rose", name: "Vintage Rose", icon: "🍇", colors: ["#462255", "#E0B1CB", "#D4A5A5"] },
-  { id: "ocean", name: "Ocean Breeze", icon: "🌊", colors: ["#003459", "#007EA7", "#E3F2FD"] },
+  { id: "natural", name: "Natural / Earthy", colors: ["#6B705C", "#A5A58D", "#B7B7A4"] },
+  { id: "coffee", name: "Coffeehouse", colors: ["#4E3629", "#D9CAB3", "#F5ECE3"] },
+  { id: "japanese-minimal", name: "Japanese Minimal", colors: ["#000000", "#F2F2F2", "#D72638"] },
+  { id: "vintage-rose", name: "Vintage Rose", colors: ["#462255", "#E0B1CB", "#D4A5A5"] },
+  { id: "ocean", name: "Ocean Breeze", colors: ["#003459", "#007EA7", "#E3F2FD"] },
 ];
 
 const FONT_STYLES = [
@@ -50,9 +48,9 @@ const LAYOUT_OPTIONS = [
 
 const MENU_SIZES = ["a4", "letter", "a5", "half-letter"] as const;
 
-type WizardStep = "content" | "name" | "slogan" | "theme" | "colors" | "fonts" | "layout" | "size";
+type WizardStep = "content" | "name" | "slogan" | "theme" | "colors" | "fonts" | "layout" | "size" | "description";
 
-const STEPS: WizardStep[] = ["content", "name", "slogan", "theme", "colors", "fonts", "layout", "size"];
+const STEPS: WizardStep[] = ["content", "name", "slogan", "theme", "colors", "fonts", "layout", "size", "description"];
 
 export default function Generate() {
   const { toast } = useToast();
@@ -68,17 +66,15 @@ export default function Generate() {
   const [isUploading, setIsUploading] = useState(false);
   
   const [restaurantName, setRestaurantName] = useState("");
-  const [wantSlogan, setWantSlogan] = useState<"yes" | "no" | null>(null);
   const [slogan, setSlogan] = useState("");
-  const [selectedTheme, setSelectedTheme] = useState<string>("");
-  const [customTheme, setCustomTheme] = useState("");
+  const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
+  const [customThemeDescription, setCustomThemeDescription] = useState("");
   const [selectedPalette, setSelectedPalette] = useState<string>("");
   const [customColors, setCustomColors] = useState<string[]>(["#1e40af", "#dc2626", "#16a34a"]);
-  const [customColorIndex, setCustomColorIndex] = useState<number | null>(null);
   const [selectedFont, setSelectedFont] = useState<string>("");
-  const [customFont, setCustomFont] = useState("");
   const [selectedLayout, setSelectedLayout] = useState<string>("");
   const [size, setSize] = useState("a4");
+  const [generalDescription, setGeneralDescription] = useState("");
   
   const [isGenerating, setIsGenerating] = useState(false);
 
@@ -144,7 +140,7 @@ export default function Generate() {
         setExtractedText(text);
         toast({
           title: "Success",
-          description: "File uploaded and text extracted successfully",
+          description: "File uploaded and text extracted",
         });
       } catch (error: any) {
         toast({
@@ -187,22 +183,23 @@ export default function Generate() {
     if (restaurantName) {
       parts.push(`Restaurant name: "${restaurantName}"`);
     }
-    if (wantSlogan === "yes" && slogan) {
+    if (slogan) {
       parts.push(`Slogan: "${slogan}"`);
     }
     
-    if (selectedTheme === "custom" && customTheme) {
-      parts.push(`Theme/Style: ${customTheme}`);
-    } else if (selectedTheme) {
-      const theme = THEME_PRESETS.find(t => t.id === selectedTheme);
-      if (theme) {
-        parts.push(`Theme: ${theme.name} - ${theme.description}`);
-      }
+    if (selectedThemes.length > 0) {
+      const themeNames = selectedThemes.map(id => {
+        const theme = THEME_PRESETS.find(t => t.id === id);
+        return theme ? `${theme.name} - ${theme.description}` : id;
+      });
+      parts.push(`Visual themes: ${themeNames.join(", ")}`);
     }
     
-    if (selectedFont === "custom" && customFont) {
-      parts.push(`Font style: ${customFont}`);
-    } else if (selectedFont) {
+    if (customThemeDescription) {
+      parts.push(`Custom style: ${customThemeDescription}`);
+    }
+    
+    if (selectedFont) {
       const font = FONT_STYLES.find(f => f.id === selectedFont);
       if (font) {
         parts.push(`Font style: ${font.name} - ${font.description}`);
@@ -216,6 +213,10 @@ export default function Generate() {
       }
     }
     
+    if (generalDescription) {
+      parts.push(`Additional requirements: ${generalDescription}`);
+    }
+    
     return parts.join(". ");
   };
 
@@ -224,26 +225,14 @@ export default function Generate() {
   const isLastStep = currentStepIndex === STEPS.length - 1;
 
   const canProceed = () => {
-    switch (currentStep) {
-      case "content":
-        return getMenuText().trim().length > 0;
-      case "name":
-        return restaurantName.trim().length > 0;
-      case "slogan":
-        return wantSlogan !== null && (wantSlogan === "no" || slogan.trim().length > 0);
-      case "theme":
-        return selectedTheme !== "" && (selectedTheme !== "custom" || customTheme.trim().length > 0);
-      case "colors":
-        return selectedPalette !== "";
-      case "fonts":
-        return selectedFont !== "" && (selectedFont !== "custom" || customFont.trim().length > 0);
-      case "layout":
-        return selectedLayout !== "";
-      case "size":
-        return size !== "";
-      default:
-        return false;
+    if (currentStep === "content") {
+      return getMenuText().trim().length > 0;
     }
+    return true;
+  };
+
+  const canSkip = () => {
+    return currentStep !== "content";
   };
 
   const goNext = () => {
@@ -254,6 +243,51 @@ export default function Generate() {
   const goBack = () => {
     if (isFirstStep) return;
     setCurrentStep(STEPS[currentStepIndex - 1]);
+  };
+
+  const handleSkip = () => {
+    if (!canSkip()) return;
+    
+    switch (currentStep) {
+      case "name":
+        setRestaurantName("");
+        break;
+      case "slogan":
+        setSlogan("");
+        break;
+      case "theme":
+        setSelectedThemes([]);
+        setCustomThemeDescription("");
+        break;
+      case "colors":
+        setSelectedPalette("");
+        break;
+      case "fonts":
+        setSelectedFont("");
+        break;
+      case "layout":
+        setSelectedLayout("");
+        break;
+      case "size":
+        setSize("a4");
+        break;
+      case "description":
+        setGeneralDescription("");
+        break;
+    }
+    goNext();
+  };
+
+  const toggleTheme = (themeId: string) => {
+    setSelectedThemes(prev => {
+      if (prev.includes(themeId)) {
+        return prev.filter(id => id !== themeId);
+      }
+      if (prev.length >= 3) {
+        return prev;
+      }
+      return [...prev, themeId];
+    });
   };
 
   const handleGenerate = async () => {
@@ -310,11 +344,13 @@ export default function Generate() {
           colors,
           size,
           stylePrompt,
-          restaurantName,
-          slogan: wantSlogan === "yes" ? slogan : null,
-          theme: selectedTheme === "custom" ? customTheme : selectedTheme,
-          fontStyle: selectedFont === "custom" ? customFont : selectedFont,
-          layout: selectedLayout,
+          restaurantName: restaurantName || null,
+          slogan: slogan || null,
+          themes: selectedThemes.length > 0 ? selectedThemes : null,
+          customThemeDescription: customThemeDescription || null,
+          fontStyle: selectedFont || null,
+          layout: selectedLayout || null,
+          generalDescription: generalDescription || null,
         }),
       });
 
@@ -419,6 +455,10 @@ export default function Generate() {
                     <div className="flex flex-col items-center gap-2">
                       <FileText className="h-12 w-12 text-primary" />
                       <p className="font-medium">{file.name}</p>
+                      <div className="flex items-center gap-2 text-sm text-green-600">
+                        <Check className="h-4 w-4" />
+                        Text extracted successfully
+                      </div>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -443,16 +483,6 @@ export default function Generate() {
                     </div>
                   )}
                 </div>
-                {extractedText && (
-                  <div className="mt-4">
-                    <Label>Extracted Text Preview</Label>
-                    <div className="mt-2 p-4 bg-muted rounded-lg max-h-40 overflow-y-auto">
-                      <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                        {extractedText.substring(0, 500)}{extractedText.length > 500 ? '...' : ''}
-                      </p>
-                    </div>
-                  </div>
-                )}
               </TabsContent>
               
               <TabsContent value="text">
@@ -474,7 +504,7 @@ export default function Generate() {
       case "name":
         return (
           <div className="space-y-4">
-            <h2 className="text-2xl font-semibold">What is the name of your restaurant?</h2>
+            <h2 className="text-2xl font-semibold">Restaurant Name</h2>
             <p className="text-muted-foreground">This will appear prominently on your menu</p>
             <Input
               placeholder="e.g., The Golden Fork, Bella Italia, Sakura Garden..."
@@ -488,75 +518,73 @@ export default function Generate() {
 
       case "slogan":
         return (
-          <div className="space-y-6">
-            <h2 className="text-2xl font-semibold">Would you like to add a slogan or tagline?</h2>
+          <div className="space-y-4">
+            <h2 className="text-2xl font-semibold">Slogan or Tagline</h2>
             <p className="text-muted-foreground">A catchy phrase that represents your restaurant</p>
-            
-            <RadioGroup value={wantSlogan || ""} onValueChange={(v) => setWantSlogan(v as "yes" | "no")}>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="yes" id="slogan-yes" />
-                <Label htmlFor="slogan-yes" className="text-base cursor-pointer">Yes, I want to add a slogan</Label>
-              </div>
-              <div className="flex items-center space-x-2">
-                <RadioGroupItem value="no" id="slogan-no" />
-                <Label htmlFor="slogan-no" className="text-base cursor-pointer">No, skip this step</Label>
-              </div>
-            </RadioGroup>
-            
-            {wantSlogan === "yes" && (
-              <Input
-                placeholder="e.g., Where Every Meal Tells a Story..."
-                value={slogan}
-                onChange={(e) => setSlogan(e.target.value)}
-                className="text-lg py-6"
-                data-testid="input-slogan"
-              />
-            )}
+            <Input
+              placeholder="e.g., Where Every Meal Tells a Story..."
+              value={slogan}
+              onChange={(e) => setSlogan(e.target.value)}
+              className="text-lg py-6"
+              data-testid="input-slogan"
+            />
           </div>
         );
 
       case "theme":
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold">Choose Your Visual Theme</h2>
-            <p className="text-muted-foreground">Select a style that matches your restaurant's atmosphere</p>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              {THEME_PRESETS.map((theme) => (
-                <button
-                  key={theme.id}
-                  onClick={() => setSelectedTheme(theme.id)}
-                  className={`p-4 rounded-lg border-2 text-left transition-all hover-elevate ${
-                    selectedTheme === theme.id ? "border-primary bg-primary/5" : "border-border"
-                  }`}
-                  data-testid={`theme-${theme.id}`}
-                >
-                  <div className="text-2xl mb-2">{theme.icon}</div>
-                  <div className="font-medium text-sm">{theme.name}</div>
-                  <div className="text-xs text-muted-foreground mt-1">{theme.description}</div>
-                </button>
-              ))}
+            <div>
+              <h2 className="text-2xl font-semibold">Visual Theme</h2>
+              <p className="text-muted-foreground">Select up to 3 themes that match your restaurant's atmosphere</p>
             </div>
             
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {THEME_PRESETS.map((theme) => {
+                const isSelected = selectedThemes.includes(theme.id);
+                const isDisabled = !isSelected && selectedThemes.length >= 3;
+                
+                return (
+                  <button
+                    key={theme.id}
+                    onClick={() => toggleTheme(theme.id)}
+                    disabled={isDisabled}
+                    className={`p-4 rounded-lg border-2 text-left transition-all ${
+                      isSelected 
+                        ? "border-primary bg-primary/10" 
+                        : isDisabled 
+                          ? "border-border opacity-50 cursor-not-allowed"
+                          : "border-border hover-elevate"
+                    }`}
+                    data-testid={`theme-${theme.id}`}
+                  >
+                    <div className="font-medium text-sm">{theme.name}</div>
+                    <div className="text-xs text-muted-foreground mt-1">{theme.description}</div>
+                    {isSelected && (
+                      <div className="mt-2">
+                        <Check className="h-4 w-4 text-primary" />
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            
+            {selectedThemes.length > 0 && (
+              <p className="text-sm text-muted-foreground">
+                {selectedThemes.length}/3 themes selected
+              </p>
+            )}
+            
             <div className="pt-4 border-t">
-              <button
-                onClick={() => setSelectedTheme("custom")}
-                className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                  selectedTheme === "custom" ? "border-primary bg-primary/5" : "border-border"
-                }`}
-              >
-                <div className="font-medium">Custom Theme</div>
-                <div className="text-sm text-muted-foreground">Describe your own style</div>
-              </button>
-              {selectedTheme === "custom" && (
-                <Textarea
-                  placeholder="Describe your desired theme... e.g., Rustic farmhouse with warm wood tones and vintage touches"
-                  value={customTheme}
-                  onChange={(e) => setCustomTheme(e.target.value)}
-                  className="mt-3 min-h-24"
-                  data-testid="textarea-custom-theme"
-                />
-              )}
+              <Label className="text-base font-medium">Add your own style description</Label>
+              <Textarea
+                placeholder="Describe additional style elements... e.g., Rustic farmhouse touches, vintage botanical illustrations, gold foil accents..."
+                value={customThemeDescription}
+                onChange={(e) => setCustomThemeDescription(e.target.value)}
+                className="mt-2 min-h-20"
+                data-testid="textarea-custom-theme"
+              />
             </div>
           </div>
         );
@@ -564,10 +592,12 @@ export default function Generate() {
       case "colors":
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold">Choose Your Color Palette</h2>
-            <p className="text-muted-foreground">Select 3 primary colors for your menu design</p>
+            <div>
+              <h2 className="text-2xl font-semibold">Color Palette</h2>
+              <p className="text-muted-foreground">Choose the colors for your menu design</p>
+            </div>
             
-            <div className="space-y-4">
+            <div className="space-y-3">
               {COLOR_PALETTES.map((palette) => (
                 <button
                   key={palette.id}
@@ -577,7 +607,6 @@ export default function Generate() {
                   }`}
                   data-testid={`palette-${palette.id}`}
                 >
-                  <span className="text-2xl">{palette.icon}</span>
                   <span className="font-medium flex-1 text-left">{palette.name}</span>
                   <div className="flex gap-2">
                     {palette.colors.map((color, i) => (
@@ -598,44 +627,50 @@ export default function Generate() {
                 className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
                   selectedPalette === "custom" ? "border-primary bg-primary/5" : "border-border"
                 }`}
+                data-testid="palette-custom"
               >
                 <div className="font-medium">Custom Colors</div>
-                <div className="text-sm text-muted-foreground">Enter your own HEX color codes</div>
+                <div className="text-sm text-muted-foreground">Pick your own color palette</div>
               </button>
+              
               {selectedPalette === "custom" && (
-                <div className="mt-4 grid grid-cols-3 gap-4">
-                  {customColors.map((color, index) => (
-                    <div key={index} className="relative">
-                      <button
-                        onClick={() => setCustomColorIndex(customColorIndex === index ? null : index)}
-                        className="w-full aspect-square rounded-lg border-2 transition-all hover:scale-105"
-                        style={{ backgroundColor: color, borderColor: customColorIndex === index ? 'var(--primary)' : 'transparent' }}
-                        data-testid={`custom-color-${index}`}
-                      />
-                      <Input
-                        value={color}
-                        onChange={(e) => {
-                          const newColors = [...customColors];
-                          newColors[index] = e.target.value;
-                          setCustomColors(newColors);
-                        }}
-                        className="mt-2 text-center text-sm font-mono"
-                        placeholder="#000000"
-                      />
-                      {customColorIndex === index && (
-                        <div className="absolute top-full left-0 mt-2 z-10 p-3 bg-background border rounded-lg shadow-lg">
-                          <HexColorPicker 
-                            color={color} 
-                            onChange={(newColor) => {
+                <div className="mt-4 space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Click on a color to change it, or enter HEX codes directly
+                  </p>
+                  <div className="grid grid-cols-3 gap-4">
+                    {customColors.map((color, index) => (
+                      <div key={index} className="space-y-2">
+                        <Label className="text-xs text-muted-foreground">
+                          Color {index + 1}
+                        </Label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="color"
+                            value={color}
+                            onChange={(e) => {
                               const newColors = [...customColors];
-                              newColors[index] = newColor;
+                              newColors[index] = e.target.value;
                               setCustomColors(newColors);
-                            }} 
+                            }}
+                            className="w-12 h-12 rounded-lg border-2 cursor-pointer"
+                            data-testid={`color-picker-${index}`}
+                          />
+                          <Input
+                            value={color}
+                            onChange={(e) => {
+                              const newColors = [...customColors];
+                              newColors[index] = e.target.value;
+                              setCustomColors(newColors);
+                            }}
+                            className="font-mono text-sm uppercase"
+                            placeholder="#000000"
+                            data-testid={`color-input-${index}`}
                           />
                         </div>
-                      )}
-                    </div>
-                  ))}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -645,8 +680,10 @@ export default function Generate() {
       case "fonts":
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold">Choose Your Font Style</h2>
-            <p className="text-muted-foreground">Select the typography feel for your menu</p>
+            <div>
+              <h2 className="text-2xl font-semibold">Font Style</h2>
+              <p className="text-muted-foreground">Select the typography feel for your menu</p>
+            </div>
             
             <div className="space-y-3">
               {FONT_STYLES.map((font) => (
@@ -663,42 +700,23 @@ export default function Generate() {
                 </button>
               ))}
             </div>
-            
-            <div className="pt-4 border-t">
-              <button
-                onClick={() => setSelectedFont("custom")}
-                className={`w-full p-4 rounded-lg border-2 text-left transition-all ${
-                  selectedFont === "custom" ? "border-primary bg-primary/5" : "border-border"
-                }`}
-              >
-                <div className="font-medium">Custom Font Style</div>
-                <div className="text-sm text-muted-foreground">Describe your own typography preferences</div>
-              </button>
-              {selectedFont === "custom" && (
-                <Textarea
-                  placeholder="Describe your font preferences... e.g., Elegant calligraphy for headings with clean sans-serif for body text"
-                  value={customFont}
-                  onChange={(e) => setCustomFont(e.target.value)}
-                  className="mt-3 min-h-20"
-                  data-testid="textarea-custom-font"
-                />
-              )}
-            </div>
           </div>
         );
 
       case "layout":
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold">Choose Your Page Layout</h2>
-            <p className="text-muted-foreground">How should your menu be organized?</p>
+            <div>
+              <h2 className="text-2xl font-semibold">Page Layout</h2>
+              <p className="text-muted-foreground">How should your menu be organized?</p>
+            </div>
             
-            <div className="grid gap-4">
+            <div className="space-y-3">
               {LAYOUT_OPTIONS.map((layout) => (
                 <button
                   key={layout.id}
                   onClick={() => setSelectedLayout(layout.id)}
-                  className={`p-6 rounded-lg border-2 text-left transition-all hover-elevate ${
+                  className={`w-full p-6 rounded-lg border-2 text-left transition-all hover-elevate ${
                     selectedLayout === layout.id ? "border-primary bg-primary/5" : "border-border"
                   }`}
                   data-testid={`layout-${layout.id}`}
@@ -714,8 +732,10 @@ export default function Generate() {
       case "size":
         return (
           <div className="space-y-6">
-            <h2 className="text-2xl font-semibold">Select Menu Size</h2>
-            <p className="text-muted-foreground">Choose the paper size for your printed menu</p>
+            <div>
+              <h2 className="text-2xl font-semibold">Menu Size</h2>
+              <p className="text-muted-foreground">Choose the paper size for your printed menu</p>
+            </div>
             
             <div className="grid grid-cols-2 gap-4">
               {MENU_SIZES.map((sizeOption) => (
@@ -734,6 +754,24 @@ export default function Generate() {
           </div>
         );
 
+      case "description":
+        return (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-semibold">Any Additional Requests?</h2>
+              <p className="text-muted-foreground">Describe anything else you'd like to see in your menu design</p>
+            </div>
+            
+            <Textarea
+              placeholder="e.g., Include decorative borders, add space for a QR code, highlight vegetarian options with a leaf icon, make prices aligned to the right..."
+              value={generalDescription}
+              onChange={(e) => setGeneralDescription(e.target.value)}
+              className="min-h-32"
+              data-testid="textarea-general-description"
+            />
+          </div>
+        );
+
       default:
         return null;
     }
@@ -743,7 +781,7 @@ export default function Generate() {
     <div className="min-h-screen bg-background">
       <header className="border-b bg-background">
         <div className="mx-auto max-w-7xl px-6 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <Link href="/dashboard">
               <div className="flex items-center gap-2 cursor-pointer">
                 <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
@@ -767,7 +805,7 @@ export default function Generate() {
                     className="h-8 w-8 rounded-full object-cover"
                   />
                 )}
-                <span className="text-sm font-medium">{userName}</span>
+                <span className="text-sm font-medium hidden sm:inline">{userName}</span>
               </div>
               <Button
                 variant="ghost"
@@ -782,38 +820,12 @@ export default function Generate() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-3xl px-6 py-12">
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-4">
-            {STEPS.map((step, index) => (
-              <div key={step} className="flex items-center">
-                <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors ${
-                    index < currentStepIndex
-                      ? "bg-primary text-primary-foreground"
-                      : index === currentStepIndex
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground"
-                  }`}
-                >
-                  {index < currentStepIndex ? <Check className="h-4 w-4" /> : index + 1}
-                </div>
-                {index < STEPS.length - 1 && (
-                  <div className={`w-6 h-0.5 mx-1 ${index < currentStepIndex ? "bg-primary" : "bg-muted"}`} />
-                )}
-              </div>
-            ))}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            Step {currentStepIndex + 1} of {STEPS.length}
-          </p>
-        </div>
-
+      <div className="mx-auto max-w-2xl px-6 py-12">
         <Card className="p-8">
           {renderStepContent()}
         </Card>
 
-        <div className="flex justify-between mt-8">
+        <div className="flex justify-between items-center mt-8 gap-4">
           <Button
             variant="outline"
             onClick={goBack}
@@ -824,40 +836,52 @@ export default function Generate() {
             Back
           </Button>
           
-          {isLastStep ? (
-            <Button
-              size="lg"
-              onClick={handleGenerate}
-              disabled={!canProceed() || isGenerating}
-              data-testid="button-generate"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                  Generating...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="h-5 w-5 mr-2" />
-                  Generate Menu Designs
-                </>
-              )}
-            </Button>
-          ) : (
-            <Button
-              onClick={goNext}
-              disabled={!canProceed()}
-              data-testid="button-next"
-            >
-              Next
-              <ChevronRight className="h-4 w-4 ml-2" />
-            </Button>
-          )}
+          <div className="flex gap-3">
+            {canSkip() && !isLastStep && (
+              <Button
+                variant="ghost"
+                onClick={handleSkip}
+                data-testid="button-skip"
+              >
+                <SkipForward className="h-4 w-4 mr-2" />
+                Skip
+              </Button>
+            )}
+            
+            {isLastStep ? (
+              <Button
+                size="lg"
+                onClick={handleGenerate}
+                disabled={!canProceed() || isGenerating}
+                data-testid="button-generate"
+              >
+                {isGenerating ? (
+                  <>
+                    <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-5 w-5 mr-2" />
+                    Generate Menu
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                onClick={goNext}
+                disabled={!canProceed()}
+                data-testid="button-next"
+              >
+                Next
+              </Button>
+            )}
+          </div>
         </div>
         
         {isLastStep && (
           <p className="text-center text-sm text-muted-foreground mt-4">
-            Generation is free! You'll get 3 unique design variations.
+            Generation is free! You'll get a professional menu design.
           </p>
         )}
       </div>

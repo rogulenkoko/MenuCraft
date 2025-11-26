@@ -600,9 +600,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stylePrompt,
         restaurantName,
         slogan,
-        theme,
+        themes,
+        customThemeDescription,
         fontStyle,
-        layout
+        layout,
+        generalDescription
       } = req.body;
 
       if (!menuText || !colors || !size) {
@@ -619,9 +621,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         stylePrompt,
         restaurantName,
         slogan,
-        theme,
+        themes,
+        customThemeDescription,
         fontStyle,
-        layout
+        layout,
+        generalDescription
       });
 
       res.json({ htmlVariations, generationId });
@@ -780,20 +784,35 @@ interface GenerateMenuParams {
   stylePrompt?: string;
   restaurantName?: string;
   slogan?: string;
-  theme?: string;
+  themes?: string[];
+  customThemeDescription?: string;
   fontStyle?: string;
   layout?: string;
+  generalDescription?: string;
 }
 
 // Function to generate a single menu design with Claude
 async function generateMenuDesigns(params: GenerateMenuParams): Promise<string[]> {
-  const { menuText, colors, size, stylePrompt, restaurantName, slogan, theme, fontStyle, layout } = params;
+  const { 
+    menuText, 
+    colors, 
+    size, 
+    stylePrompt, 
+    restaurantName, 
+    slogan, 
+    themes, 
+    customThemeDescription,
+    fontStyle, 
+    layout,
+    generalDescription 
+  } = params;
   
   try {
-    // Build theme description
+    // Build theme description from multiple themes
     let themeDesc = "";
-    if (theme) {
-      themeDesc = THEME_DESCRIPTIONS[theme] || theme;
+    if (themes && themes.length > 0) {
+      const themeDescriptions = themes.map(t => THEME_DESCRIPTIONS[t] || t);
+      themeDesc = themeDescriptions.join("; ");
     }
     
     // Build font description
@@ -826,10 +845,12 @@ Requirements:
 
 ${restaurantName ? `Restaurant Name: "${restaurantName}" - Display prominently in the header` : ""}
 ${slogan ? `Slogan/Tagline: "${slogan}" - Display under the restaurant name` : ""}
-${themeDesc ? `Visual Theme: ${themeDesc}` : ""}
+${themeDesc ? `Visual Themes to blend: ${themeDesc}` : ""}
+${customThemeDescription ? `Custom style elements: ${customThemeDescription}` : ""}
 ${fontDesc ? `Typography Style: ${fontDesc}` : ""}
 ${layoutDesc ? `Page Layout: ${layoutDesc}` : ""}
-${stylePrompt ? `Additional Style Notes: ${stylePrompt}` : ""}
+${generalDescription ? `Additional requirements: ${generalDescription}` : ""}
+${stylePrompt ? `Extra notes: ${stylePrompt}` : ""}
 
 IMPORTANT: Output ONLY the raw HTML code. Do NOT wrap it in markdown code blocks or add any explanations. Start directly with <!DOCTYPE html> and end with </html>.`;
 
@@ -842,7 +863,7 @@ Create a complete HTML file that:
 1. Opens directly in a browser
 2. Prints beautifully as PDF
 3. Follows the visual theme and style specifications exactly
-4. Has a professional header with the restaurant name${slogan ? ' and slogan' : ''}
+4. ${restaurantName ? `Has a professional header with the restaurant name "${restaurantName}"${slogan ? ` and slogan "${slogan}"` : ''}` : 'Has a clean header area'}
 5. Organizes menu items into clear sections
 6. Uses the specified color palette throughout
 7. Applies the typography style consistently
