@@ -231,15 +231,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get('/api/credits', verifySupabaseToken, async (req: any, res) => {
     try {
       const userId = req.supabaseUser.id;
-      const creditsStatus = await supabaseStorage.getCreditsStatus(userId);
+      const userEmail = req.supabaseUser.email;
       
+      // Try to get credits status first
+      let creditsStatus = await supabaseStorage.getCreditsStatus(userId);
+      
+      // If no profile exists, create one
       if (!creditsStatus) {
-        return res.json({
-          hasActivated: false,
-          menuCredits: 0,
-          totalGenerated: 0,
-          paymentRequired: isPaymentRequired(),
+        console.log(`Creating profile for user ${userId} (${userEmail})`);
+        const newProfile = await supabaseStorage.createProfile({
+          id: userId,
+          email: userEmail,
+          name: req.supabaseUser.user_metadata?.full_name || req.supabaseUser.user_metadata?.name || null,
+          avatar_url: req.supabaseUser.user_metadata?.avatar_url || null,
         });
+        
+        if (newProfile) {
+          creditsStatus = {
+            hasActivated: newProfile.has_activated || false,
+            menuCredits: newProfile.menu_credits || 0,
+            totalGenerated: newProfile.total_generated || 0,
+          };
+        } else {
+          // If profile creation failed, return defaults
+          return res.json({
+            hasActivated: false,
+            menuCredits: 0,
+            totalGenerated: 0,
+            paymentRequired: isPaymentRequired(),
+          });
+        }
       }
       
       res.json({ 
