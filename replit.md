@@ -154,8 +154,13 @@ The app previously used:
 - Server-side sessions → Now uses Supabase JWT sessions
 
 ### Benefits of New Architecture
-- **No backend server required** - Pure frontend deployment
-- **Secure API keys** - Kept in Edge Functions, never exposed to client
-- **Row Level Security** - Database automatically enforces user access
-- **Simpler deployment** - Deploy to Vercel, Netlify, or any static host
+- **Single database** - Supabase PostgreSQL for all data (profiles, generations)
+- **Secure API keys** - Server-side admin client handles writes, client only reads
+- **Row Level Security** - Database automatically enforces user access for reads
+- **Auth with fallbacks** - localStorage session recovery with timeouts
 - **Automatic scaling** - Supabase handles database and auth scaling
+
+### Important Implementation Notes
+- **Profile creation**: Handled server-side via admin client (RLS blocks client inserts)
+- **Auth timeouts**: 3-5 second timeouts on profile fetch to prevent infinite loading
+- **Session recovery**: Uses localStorage session when valid, falls back to getSession API
