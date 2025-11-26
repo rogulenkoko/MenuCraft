@@ -40,33 +40,37 @@ export function useSupabaseAuth() {
   const createOrUpdateProfile = useCallback(async (user: User) => {
     if (!isSupabaseConfigured || !supabase) return null;
 
-    // First try to fetch existing profile
-    const { data: existingProfile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+    try {
+      // Try to fetch existing profile with a timeout
+      const fetchPromise = supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
+      
+      const timeoutPromise = new Promise<{ data: null; error: { code: string } }>((resolve) =>
+        setTimeout(() => resolve({ data: null, error: { code: 'TIMEOUT' } }), 3000)
+      );
+      
+      const { data: existingProfile, error } = await Promise.race([fetchPromise, timeoutPromise]);
 
-    if (existingProfile) {
-      return existingProfile as Profile;
+      if (error && error.code !== 'PGRST116' && error.code !== 'TIMEOUT') {
+        console.error('[Auth] Profile fetch error:', error);
+      }
+
+      if (existingProfile) {
+        return existingProfile as Profile;
+      }
+
+      // Profile doesn't exist - don't try to insert from client (RLS blocks it)
+      // Profile will be created by server-side trigger or admin operations
+      console.log('[Auth] Profile not found, will be created on first server request');
+      return null;
+    } catch (err) {
+      console.error('[Auth] Error in createOrUpdateProfile:', err);
+      return null;
     }
-
-    // Profile doesn't exist, create it
-    const { error } = await supabase.from('profiles').insert({
-      id: user.id,
-      email: user.email,
-      name: user.user_metadata?.full_name || user.user_metadata?.name || null,
-      avatar_url: user.user_metadata?.avatar_url || null,
-    });
-
-    // Ignore duplicate key error (23505) - profile might have been created by another request
-    if (error && error.code !== '23505') {
-      console.error('Error creating profile:', error);
-    }
-
-    // Fetch and return the profile
-    return fetchProfile(user.id);
-  }, [fetchProfile]);
+  }, []);
 
   useEffect(() => {
     console.log('[Auth] Starting auth initialization, isSupabaseConfigured:', isSupabaseConfigured);
@@ -115,13 +119,24 @@ export function useSupabaseAuth() {
               if (user) {
                 let profile = null;
                 try {
-                  profile = await createOrUpdateProfile(user);
+                  console.log('[Auth] Fetching profile for user...');
+                  // Add timeout to profile fetch to prevent infinite loading
+                  const profilePromise = createOrUpdateProfile(user);
+                  const profileTimeout = new Promise<null>((resolve) => 
+                    setTimeout(() => {
+                      console.log('[Auth] Profile fetch timeout, continuing without profile');
+                      resolve(null);
+                    }, 5000)
+                  );
+                  profile = await Promise.race([profilePromise, profileTimeout]);
+                  console.log('[Auth] Profile result:', profile ? 'success' : 'null/timeout');
                 } catch (profileError) {
                   console.error('[Auth] Profile fetch error:', profileError);
                 }
                 
                 if (!isMounted) return;
                 
+                console.log('[Auth] Setting authenticated state');
                 setAuthState({
                   user,
                   profile,
@@ -133,7 +148,8 @@ export function useSupabaseAuth() {
                 return;
               }
             } else {
-              console.log('[Auth] Stored session expired');
+              console.log('[Auth] Stored session expired, clearing localStorage');
+              localStorage.removeItem(storageKey);
             }
           } catch (parseError) {
             console.error('[Auth] Error parsing stored session:', parseError);
