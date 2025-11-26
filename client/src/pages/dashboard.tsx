@@ -1,27 +1,64 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, FileText, Clock, LogOut, Plus, CheckCircle } from "lucide-react";
-import { Link, useLocation, useSearch } from "wouter";
+import { 
+  Sparkles, 
+  FileText, 
+  LogOut, 
+  Plus, 
+  Download, 
+  Save, 
+  RotateCcw,
+  Loader2,
+  Calendar,
+  ChevronRight
+} from "lucide-react";
+import { Link, useLocation, useParams, useSearch } from "wouter";
 import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
 import { format } from "date-fns";
+
+function sanitizeHtml(html: string): string {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, 'text/html');
+  
+  doc.querySelectorAll('script').forEach(el => el.remove());
+  doc.querySelectorAll('[onclick], [onerror], [onload], [onmouseover]').forEach(el => {
+    el.removeAttribute('onclick');
+    el.removeAttribute('onerror');
+    el.removeAttribute('onload');
+    el.removeAttribute('onmouseover');
+  });
+  
+  return doc.documentElement.outerHTML;
+}
 
 export default function Dashboard() {
   const { toast } = useToast();
   const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
-  const { hasActiveSubscription, subscriptionRequired, canDownload, refreshSubscription } = useSubscription();
+  const { hasActiveSubscription, subscriptionRequired, refreshSubscription } = useSubscription();
   const [, setLocation] = useLocation();
+  const params = useParams<{ id?: string }>();
   const search = useSearch();
   const successToastShown = useRef(false);
 
   const [generations, setGenerations] = useState<MenuGeneration[]>([]);
   const [generationsLoading, setGenerationsLoading] = useState(true);
-  const [showSuccessBanner, setShowSuccessBanner] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(params.id || null);
+  const [editedHtml, setEditedHtml] = useState<string>("");
+  const [originalHtml, setOriginalHtml] = useState<string>("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const hasInitializedIframe = useRef(false);
+  const lastSavedHtmlRef = useRef<string>("");
 
+  // Handle subscription success redirect
   useEffect(() => {
     const params = new URLSearchParams(search);
     const subscriptionParam = params.get('subscription');
@@ -31,7 +68,6 @@ export default function Dashboard() {
       if ((subscriptionParam === 'success' || storedSuccess === 'true') && !successToastShown.current) {
         successToastShown.current = true;
         
-        // Sync subscription status from Stripe
         try {
           const session = await supabase?.auth.getSession();
           if (session?.data?.session?.access_token) {
@@ -45,9 +81,7 @@ export default function Dashboard() {
             
             if (response.ok) {
               const data = await response.json();
-              console.log('Subscription synced:', data);
               if (data.has_active_subscription) {
-                setShowSuccessBanner(true);
                 toast({
                   title: "Payment Successful!",
                   description: "Thank you for subscribing to Claude Menu Pro!",
@@ -70,6 +104,7 @@ export default function Dashboard() {
     syncSubscription();
   }, [search, toast, refreshSubscription]);
 
+  // Redirect if not authenticated
   useEffect(() => {
     if (!isLoading && !isAuthenticated && isSupabaseReady) {
       toast({
@@ -83,6 +118,7 @@ export default function Dashboard() {
     }
   }, [isAuthenticated, isLoading, isSupabaseReady, toast, setLocation]);
 
+  // Fetch all generations
   useEffect(() => {
     async function fetchGenerations() {
       if (!isAuthenticated || !isSupabaseConfigured || !supabase) {
@@ -97,7 +133,23 @@ export default function Dashboard() {
           .order('created_at', { ascending: false });
 
         if (error) throw error;
-        setGenerations(data || []);
+        
+        const generationsList = data || [];
+        setGenerations(generationsList);
+        
+        // If we have generations and no selected ID, select the most recent
+        if (generationsList.length > 0 && !selectedId) {
+          setSelectedId(generationsList[0].id);
+        }
+        
+        // If no generations exist, redirect to generate page
+        if (generationsList.length === 0) {
+          toast({
+            title: "No menus yet",
+            description: "Create your first menu design",
+          });
+          setTimeout(() => setLocation("/"), 1000);
+        }
       } catch (error) {
         console.error('Error fetching generations:', error);
       } finally {
@@ -108,7 +160,73 @@ export default function Dashboard() {
     if (isAuthenticated) {
       fetchGenerations();
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, selectedId, toast, setLocation]);
+
+  // Load selected generation HTML
+  useEffect(() => {
+    const selected = generations.find(g => g.id === selectedId);
+    if (selected) {
+      const html = selected.html_variations?.[0] || "";
+      setEditedHtml(html);
+      setOriginalHtml(html);
+      lastSavedHtmlRef.current = html;
+      hasInitializedIframe.current = false;
+    }
+  }, [selectedId, generations]);
+
+  // Setup editable iframe - only runs once when HTML changes
+  const setupEditableIframe = useCallback(() => {
+    if (!iframeRef.current || !editedHtml || hasInitializedIframe.current) return;
+    
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    
+    if (iframeDoc) {
+      const sanitized = sanitizeHtml(editedHtml);
+      iframeDoc.open();
+      iframeDoc.write(sanitized);
+      iframeDoc.close();
+
+      // Make the body editable
+      iframeDoc.body.contentEditable = "true";
+      iframeDoc.body.style.cursor = "text";
+      iframeDoc.body.style.outline = "none";
+      
+      // Add some basic styling for better editing experience
+      const style = iframeDoc.createElement('style');
+      style.textContent = `
+        body { outline: none !important; }
+        *:focus { outline: none !important; }
+        [contenteditable]:focus { outline: none !important; }
+      `;
+      iframeDoc.head.appendChild(style);
+      
+      hasInitializedIframe.current = true;
+    }
+  }, [editedHtml]);
+
+  // Initialize iframe when HTML is ready
+  useEffect(() => {
+    if (editedHtml && iframeRef.current && !hasInitializedIframe.current) {
+      const timer = setTimeout(() => {
+        setupEditableIframe();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [editedHtml, setupEditableIframe]);
+
+  // Get current HTML from iframe without causing re-render
+  const getCurrentHtmlFromIframe = useCallback(() => {
+    if (!iframeRef.current) return editedHtml;
+    
+    const iframe = iframeRef.current;
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    
+    if (iframeDoc) {
+      return `<!DOCTYPE html><html>${iframeDoc.documentElement.innerHTML}</html>`;
+    }
+    return editedHtml;
+  }, [editedHtml]);
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -123,61 +241,114 @@ export default function Dashboard() {
     }
   };
 
-  const handleSyncSubscription = async () => {
+  const handleSelectGeneration = (id: string) => {
+    if (id !== selectedId) {
+      setSelectedId(id);
+      hasInitializedIframe.current = false;
+      // Update URL without triggering navigation
+      window.history.replaceState({}, '', `/dashboard/${id}`);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!supabase || !selectedId) return;
+    
+    setIsSaving(true);
     try {
-      const session = await supabase?.auth.getSession();
-      if (!session?.data?.session?.access_token) {
-        toast({
-          title: "Not authenticated",
-          description: "Please sign in to sync your subscription",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      toast({
-        title: "Syncing...",
-        description: "Checking your subscription status with Stripe",
-      });
-
-      const response = await fetch('/api/stripe/sync-subscription', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.data.session.access_token}`,
-        },
-      });
+      const currentHtml = getCurrentHtmlFromIframe();
       
-      if (response.ok) {
-        const data = await response.json();
-        console.log('Subscription synced:', data);
-        
-        if (data.has_active_subscription) {
-          setShowSuccessBanner(true);
-          toast({
-            title: "Subscription Active!",
-            description: "Your subscription is now active. You can download your designs.",
-          });
-        } else {
-          toast({
-            title: "No Active Subscription",
-            description: data.message || "No active subscription found. Please complete your payment.",
-          });
-        }
-        refreshSubscription?.();
-      } else {
-        const error = await response.json();
-        toast({
-          title: "Sync Failed",
-          description: error.message || "Failed to sync subscription",
-          variant: "destructive",
-        });
-      }
-    } catch (error: any) {
-      console.error('Error syncing subscription:', error);
+      const { error } = await supabase
+        .from('menu_generations')
+        .update({ html_variations: [currentHtml] })
+        .eq('id', selectedId);
+
+      if (error) throw error;
+      
+      setOriginalHtml(currentHtml);
+      setEditedHtml(currentHtml);
+      lastSavedHtmlRef.current = currentHtml;
+      
       toast({
-        title: "Sync Failed",
-        description: error.message || "An error occurred",
+        title: "Saved",
+        description: "Your menu changes have been saved",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Save Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleReset = () => {
+    setEditedHtml(originalHtml);
+    hasInitializedIframe.current = false;
+    toast({
+      title: "Reset",
+      description: "Menu content has been reset to last saved version",
+    });
+  };
+
+  const handleDownloadPdf = async () => {
+    setIsDownloading(true);
+    
+    try {
+      const currentHtml = getCurrentHtmlFromIframe();
+      const printWindow = window.open('', '_blank');
+      if (!printWindow) {
+        throw new Error('Could not open print window. Please allow popups.');
+      }
+      
+      printWindow.document.write(currentHtml);
+      printWindow.document.close();
+      
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+        }, 500);
+      };
+      
+      toast({
+        title: "Print Dialog Opened",
+        description: "Select 'Save as PDF' in the print dialog to download your menu",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Download Failed",
+        description: error.message || "Could not generate PDF",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
+  const handleDownloadHtml = () => {
+    try {
+      const currentHtml = getCurrentHtmlFromIframe();
+      const selected = generations.find(g => g.id === selectedId);
+      
+      const blob = new Blob([currentHtml], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `menu-${selected?.file_name || 'design'}.html`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Downloaded",
+        description: "HTML file has been downloaded",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Download Failed",
+        description: error.message,
         variant: "destructive",
       });
     }
@@ -197,7 +368,7 @@ export default function Dashboard() {
         <Card className="p-8 max-w-md text-center">
           <h2 className="text-xl font-semibold mb-4">Setup Required</h2>
           <p className="text-muted-foreground">
-            Please configure Supabase credentials (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY) to use this application.
+            Please configure Supabase credentials to use this application.
           </p>
         </Card>
       </div>
@@ -210,19 +381,30 @@ export default function Dashboard() {
 
   const userName = profile?.name || user.user_metadata?.full_name || user.email;
   const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
+  const selectedGeneration = generations.find(g => g.id === selectedId);
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b bg-background">
-        <div className="mx-auto max-w-7xl px-6 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-                <Sparkles className="h-5 w-5 text-primary-foreground" />
+    <div className="h-screen flex flex-col bg-background">
+      {/* Header */}
+      <header className="border-b bg-background shrink-0">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between gap-4">
+            <Link href="/">
+              <div className="flex items-center gap-2 cursor-pointer">
+                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
+                  <Sparkles className="h-5 w-5 text-primary-foreground" />
+                </div>
+                <span className="text-xl font-semibold tracking-tight hidden sm:inline">Claude Menu</span>
               </div>
-              <span className="text-xl font-semibold tracking-tight">Claude Menu</span>
-            </div>
-            <div className="flex items-center gap-4">
+            </Link>
+            
+            <div className="flex items-center gap-2 sm:gap-4">
+              <Link href="/">
+                <Button variant="outline" size="sm" data-testid="button-new-menu">
+                  <Plus className="h-4 w-4 mr-2" />
+                  <span className="hidden sm:inline">New Menu</span>
+                </Button>
+              </Link>
               <ThemeToggle />
               <div className="flex items-center gap-2">
                 {userAvatar && (
@@ -233,7 +415,7 @@ export default function Dashboard() {
                     data-testid="img-user-avatar"
                   />
                 )}
-                <span className="text-sm font-medium" data-testid="text-user-name">
+                <span className="text-sm font-medium hidden md:inline" data-testid="text-user-name">
                   {userName}
                 </span>
               </div>
@@ -250,172 +432,228 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-6 py-12">
-        {showSuccessBanner && (
-          <Card className="mb-8 p-4 bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800">
-            <div className="flex items-center gap-3">
-              <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
-              <div>
-                <h3 className="font-semibold text-green-800 dark:text-green-200">
-                  Payment Successful!
-                </h3>
-                <p className="text-sm text-green-700 dark:text-green-300">
-                  Thank you for subscribing to Claude Menu Pro. You now have full access to all features.
-                </p>
-              </div>
-              <Button 
-                variant="ghost" 
-                size="sm" 
-                className="ml-auto" 
-                onClick={() => setShowSuccessBanner(false)}
-              >
-                Dismiss
-              </Button>
-            </div>
-          </Card>
-        )}
-
-        <div className="mb-12">
-          <h1 className="text-4xl font-semibold mb-8" data-testid="text-dashboard-title">
-            Dashboard
-          </h1>
-          <div className="grid gap-6 md:grid-cols-3">
-            <Card className="p-6">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-muted-foreground">Total Menus</span>
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <div className="text-3xl font-bold" data-testid="text-total-menus">
-                {generations.length}
-              </div>
-            </Card>
-            <Card className="p-6">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-sm text-muted-foreground">Subscription</span>
-                <Clock className="h-4 w-4 text-muted-foreground" />
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-xl font-semibold" data-testid="text-subscription-status">
-                  {!subscriptionRequired ? "Free" : hasActiveSubscription ? "Active" : "Free"}
-                </div>
-                {subscriptionRequired && !hasActiveSubscription && (
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={handleSyncSubscription}
-                    data-testid="button-sync-subscription"
-                  >
-                    Sync
-                  </Button>
-                )}
-              </div>
-            </Card>
-            <Card className="p-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-sm text-muted-foreground block mb-2">Quick Action</span>
-                  <Link href="/generate">
-                    <Button data-testid="button-new-menu">
-                      <Plus className="h-4 w-4 mr-2" />
-                      New Menu
-                    </Button>
-                  </Link>
-                  {subscriptionRequired && !hasActiveSubscription && (
-                    <p className="text-xs text-muted-foreground mt-2">
-                      Subscribe to download designs
-                    </p>
-                  )}
-                </div>
-              </div>
-            </Card>
+      {/* Main content */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left sidebar - Menu list */}
+        <div className="w-64 lg:w-80 border-r bg-muted/30 flex flex-col shrink-0">
+          <div className="p-4 border-b">
+            <h2 className="font-semibold text-lg" data-testid="text-my-menus-title">My Menus</h2>
+            <p className="text-sm text-muted-foreground">{generations.length} menu{generations.length !== 1 ? 's' : ''}</p>
           </div>
-        </div>
-
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-semibold" data-testid="text-recent-title">
-              Recent Generations
-            </h2>
-            <Link href="/generate">
-              <Button data-testid="button-create-new">
-                <Plus className="h-4 w-4 mr-2" />
-                Create New
-              </Button>
-            </Link>
-          </div>
-
-          {generationsLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-            </div>
-          ) : generations.length === 0 ? (
-            <Card className="p-12 text-center">
-              <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-xl font-medium mb-2" data-testid="text-empty-state-title">
-                No menus generated yet
-              </h3>
-              <p className="text-muted-foreground mb-6">
-                Create your first beautiful menu design for free
-              </p>
-              <Link href="/generate">
-                <Button data-testid="button-generate-first">
-                  Generate Your First Menu
-                </Button>
-              </Link>
-              {subscriptionRequired && !hasActiveSubscription && (
-                <p className="text-xs text-muted-foreground mt-4">
-                  Note: Subscription required to download final designs
-                </p>
-              )}
-            </Card>
-          ) : (
-            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-              {generations.map((generation) => (
-                <Link key={generation.id} href={`/result/${generation.id}`}>
-                  <Card
-                    className="p-6 hover-elevate cursor-pointer"
-                    data-testid={`card-generation-${generation.id}`}
-                  >
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex-1">
-                        <h3 className="font-medium mb-1 line-clamp-1" data-testid={`text-menu-name-${generation.id}`}>
-                          {generation.file_name}
-                        </h3>
-                        <p className="text-sm text-muted-foreground">
-                          {generation.created_at && format(new Date(generation.created_at), "MMM d, yyyy")}
-                        </p>
+          
+          <ScrollArea className="flex-1">
+            <div className="p-2">
+              {generationsLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : generations.length === 0 ? (
+                <div className="text-center py-8 px-4">
+                  <FileText className="h-12 w-12 text-muted-foreground mx-auto mb-3" />
+                  <p className="text-sm text-muted-foreground">No menus yet</p>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {generations.map((generation) => (
+                    <button
+                      key={generation.id}
+                      onClick={() => handleSelectGeneration(generation.id)}
+                      className={`w-full text-left p-3 rounded-lg transition-colors ${
+                        selectedId === generation.id
+                          ? 'bg-primary/10 border border-primary/20'
+                          : 'hover:bg-muted'
+                      }`}
+                      data-testid={`button-menu-${generation.id}`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <h3 className="font-medium text-sm truncate" data-testid={`text-menu-name-${generation.id}`}>
+                            {generation.file_name || 'Untitled Menu'}
+                          </h3>
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
+                            <Calendar className="h-3 w-3" />
+                            <span>
+                              {generation.created_at && format(new Date(generation.created_at), "MMM d, yyyy")}
+                            </span>
+                          </div>
+                        </div>
+                        {selectedId === generation.id && (
+                          <ChevronRight className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                        )}
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 text-sm">
-                      <span className="px-2 py-1 rounded-md bg-muted text-muted-foreground">
-                        {generation.size}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {generation.colors?.length || 0} colors
-                      </span>
-                    </div>
-                  </Card>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+
+          {subscriptionRequired && !hasActiveSubscription && (
+            <div className="p-4 border-t">
+              <Card className="p-3 bg-primary/5 border-primary/20">
+                <p className="text-xs text-muted-foreground mb-2">
+                  Subscribe to download your designs
+                </p>
+                <Link href="/subscribe">
+                  <Button size="sm" className="w-full" data-testid="button-upgrade">
+                    Upgrade to Pro
+                  </Button>
                 </Link>
-              ))}
+              </Card>
             </div>
           )}
         </div>
 
-        {subscriptionRequired && !hasActiveSubscription && (
-          <Card className="mt-12 p-8 bg-primary/5 border-primary/20">
-            <div className="text-center max-w-2xl mx-auto">
-              <h3 className="text-2xl font-semibold mb-2">Upgrade to Pro</h3>
-              <p className="text-muted-foreground mb-6">
-                Subscribe to unlock unlimited menu downloads and premium features
-              </p>
-              <Link href="/subscribe">
-                <Button size="lg" data-testid="button-upgrade-pro">
-                  Upgrade Now
-                </Button>
-              </Link>
+        {/* Right side - Menu editor */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Editor toolbar */}
+          <div className="border-b bg-background shrink-0">
+            <div className="px-4 py-3">
+              <div className="flex items-center justify-between gap-4 flex-wrap">
+                <div className="min-w-0">
+                  <h1 className="text-lg font-semibold truncate" data-testid="text-menu-title">
+                    {selectedGeneration?.file_name || 'Select a menu'}
+                  </h1>
+                  <p className="text-sm text-muted-foreground">
+                    Click on text in the preview to edit
+                  </p>
+                </div>
+                
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReset}
+                    data-testid="button-reset"
+                  >
+                    <RotateCcw className="h-4 w-4 mr-2" />
+                    Reset
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    data-testid="button-save"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    Save
+                  </Button>
+                  {subscriptionRequired && !hasActiveSubscription ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled
+                            data-testid="button-download-html"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            HTML
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Subscribe to download</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDownloadHtml}
+                      data-testid="button-download-html"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      HTML
+                    </Button>
+                  )}
+                  {subscriptionRequired && !hasActiveSubscription ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Button
+                            size="sm"
+                            disabled
+                            data-testid="button-download-pdf"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            PDF
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p>Subscribe to download</p>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : (
+                    <Button
+                      size="sm"
+                      onClick={handleDownloadPdf}
+                      disabled={isDownloading}
+                      data-testid="button-download-pdf"
+                    >
+                      {isDownloading ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4 mr-2" />
+                      )}
+                      PDF
+                    </Button>
+                  )}
+                </div>
+              </div>
             </div>
-          </Card>
-        )}
+          </div>
+
+          {/* Menu preview/editor */}
+          <div className="flex-1 overflow-auto p-4 bg-muted/20">
+            <div className="max-w-4xl mx-auto">
+              {generationsLoading ? (
+                <div className="flex items-center justify-center py-24">
+                  <div className="text-center">
+                    <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+                    <p className="text-muted-foreground">Loading your menus...</p>
+                  </div>
+                </div>
+              ) : !selectedId ? (
+                <Card className="p-12 text-center">
+                  <FileText className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-xl font-medium mb-2">Select a Menu</h3>
+                  <p className="text-muted-foreground">
+                    Choose a menu from the list to view and edit
+                  </p>
+                </Card>
+              ) : !editedHtml ? (
+                <Card className="p-12 text-center">
+                  <Loader2 className="h-16 w-16 text-primary animate-spin mx-auto mb-4" />
+                  <h3 className="text-xl font-medium mb-2">Loading Menu</h3>
+                  <p className="text-muted-foreground">
+                    Please wait while we load your menu design...
+                  </p>
+                </Card>
+              ) : (
+                <Card className="overflow-hidden shadow-lg">
+                  <div className="bg-white">
+                    <iframe
+                      ref={iframeRef}
+                      className="w-full border-0"
+                      style={{ minHeight: '800px', height: 'auto' }}
+                      title="Menu Preview"
+                      sandbox="allow-same-origin"
+                      data-testid="iframe-menu-preview"
+                    />
+                  </div>
+                </Card>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -4,7 +4,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
 import Dashboard from "@/pages/dashboard";
 import Generate from "@/pages/generate";
-import Result from "@/pages/result";
 import Subscribe from "@/pages/subscribe";
 import AuthCallback from "@/pages/auth-callback";
 import NotFound from "@/pages/not-found";
@@ -32,15 +31,17 @@ function Router() {
       {/* Generate page is now the landing page - accessible to everyone */}
       <Route path="/" component={Generate} />
       
-      <Route path="/dashboard">
+      {/* Dashboard with optional menu ID - shows all menus with editor */}
+      <Route path="/dashboard/:id?">
         {isAuthenticated ? <Dashboard /> : <Redirect to="/" />}
       </Route>
       
       {/* Generate is also accessible at /generate for direct links */}
       <Route path="/generate" component={Generate} />
       
+      {/* Legacy result route redirects to dashboard */}
       <Route path="/result/:id">
-        {isAuthenticated ? <Result /> : <Redirect to="/" />}
+        {({ id }) => <Redirect to={`/dashboard/${id}`} />}
       </Route>
       
       <Route path="/subscribe">

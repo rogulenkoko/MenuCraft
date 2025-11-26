@@ -30,10 +30,18 @@ Claude Menu is a SaaS application that transforms restaurant menus into stunning
 - **Pages**:
   - `/` - Menu generator wizard (public, login on generate)
   - `/auth/callback` - OAuth callback handler
-  - `/dashboard` - User dashboard with generation history (auth required)
+  - `/dashboard` or `/dashboard/:id` - Combined dashboard with menu list and editor (auth required, redirects to / if no menus)
   - `/generate` - Alias for landing page
-  - `/result/:id` - View and download generated designs (auth required)
+  - `/result/:id` - Legacy route, redirects to `/dashboard/:id`
   - `/subscribe` - Stripe subscription checkout (auth required)
+
+### Dashboard Page Features
+- **Left sidebar**: List of all previously generated menus, sorted by date
+- **Right panel**: Full-screen menu editor with:
+  - Inline contentEditable editing (click text to edit)
+  - Save, Reset, Download HTML, Save as PDF buttons
+  - Real-time preview of the menu design
+- **Access control**: Redirects to generate page if user has no menus or is not logged in
 
 ## Menu Generation Wizard (9 Steps)
 1. **Content** (required) - Upload PDF/DOCX/TXT or paste menu text

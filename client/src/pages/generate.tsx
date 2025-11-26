@@ -498,7 +498,7 @@ export default function Generate() {
         title: "Success",
         description: "Your menu design is ready!",
       });
-      setLocation(`/result/${generation.id}`);
+      setLocation(`/dashboard/${generation.id}`);
     } catch (error: any) {
       console.error('Generation error:', error);
       toast({
