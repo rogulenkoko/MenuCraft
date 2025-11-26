@@ -2,7 +2,6 @@ import { Switch, Route, Redirect, useLocation } from "wouter";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
-import Landing from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import Generate from "@/pages/generate";
 import Result from "@/pages/result";
@@ -30,17 +29,15 @@ function Router() {
 
   return (
     <Switch>
-      <Route path="/">
-        {isAuthenticated ? <Redirect to="/dashboard" /> : <Landing />}
-      </Route>
+      {/* Generate page is now the landing page - accessible to everyone */}
+      <Route path="/" component={Generate} />
       
       <Route path="/dashboard">
         {isAuthenticated ? <Dashboard /> : <Redirect to="/" />}
       </Route>
       
-      <Route path="/generate">
-        {isAuthenticated ? <Generate /> : <Redirect to="/" />}
-      </Route>
+      {/* Generate is also accessible at /generate for direct links */}
+      <Route path="/generate" component={Generate} />
       
       <Route path="/result/:id">
         {isAuthenticated ? <Result /> : <Redirect to="/" />}

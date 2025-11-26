@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -7,8 +7,10 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type, ChevronLeft, SkipForward, Check } from "lucide-react";
+import { SiGoogle } from "react-icons/si";
 import { Link, useLocation } from "wouter";
 import { useDropzone } from "react-dropzone";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
@@ -54,10 +56,12 @@ const STEPS: WizardStep[] = ["content", "name", "slogan", "theme", "colors", "fo
 
 export default function Generate() {
   const { toast } = useToast();
-  const { user, profile, session, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
+  const { user, profile, session, isAuthenticated, signOut, signInWithGoogle } = useSupabaseAuth();
   const [, setLocation] = useLocation();
 
   const [currentStep, setCurrentStep] = useState<WizardStep>("content");
+  const [showLoginDialog, setShowLoginDialog] = useState(false);
+  const [isSigningIn, setIsSigningIn] = useState(false);
   
   const [inputMethod, setInputMethod] = useState<"file" | "text">("file");
   const [file, setFile] = useState<File | null>(null);
@@ -78,23 +82,27 @@ export default function Generate() {
   
   const [isGenerating, setIsGenerating] = useState(false);
 
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated && isSupabaseReady) {
-      toast({
-        title: "Please sign in",
-        description: "Redirecting to home page...",
-        variant: "destructive",
-      });
-      setTimeout(() => {
-        setLocation("/");
-      }, 500);
-    }
-  }, [isAuthenticated, isLoading, isSupabaseReady, toast, setLocation]);
-
   const handleSignOut = async () => {
     const { error } = await signOut();
     if (!error) {
-      setLocation("/");
+      toast({
+        title: "Signed out",
+        description: "You have been signed out successfully",
+      });
+    }
+  };
+
+  const handleGoogleSignIn = async () => {
+    setIsSigningIn(true);
+    try {
+      await signInWithGoogle();
+    } catch (error) {
+      toast({
+        title: "Sign in failed",
+        description: "Could not sign in with Google. Please try again.",
+        variant: "destructive",
+      });
+      setIsSigningIn(false);
     }
   };
 
@@ -174,7 +182,7 @@ export default function Generate() {
       return customColors;
     }
     const palette = COLOR_PALETTES.find(p => p.id === selectedPalette);
-    return palette?.colors || customColors;
+    return palette?.colors || ["#1e40af", "#dc2626", "#16a34a"];
   };
 
   const getStylePrompt = () => {
@@ -290,6 +298,14 @@ export default function Generate() {
     });
   };
 
+  const handleGenerateClick = () => {
+    if (!isAuthenticated) {
+      setShowLoginDialog(true);
+      return;
+    }
+    handleGenerate();
+  };
+
   const handleGenerate = async () => {
     const menuText = getMenuText();
     
@@ -312,6 +328,7 @@ export default function Generate() {
     }
 
     setIsGenerating(true);
+    setShowLoginDialog(false);
 
     try {
       const colors = getCurrentColors();
@@ -374,7 +391,7 @@ export default function Generate() {
 
       toast({
         title: "Success",
-        description: "Your menu designs are ready!",
+        description: "Your menu design is ready!",
       });
       setLocation(`/result/${generation.id}`);
     } catch (error: any) {
@@ -389,14 +406,6 @@ export default function Generate() {
     }
   };
 
-  if (isLoading || !isSupabaseReady) {
-    return (
-      <div className="flex h-screen items-center justify-center">
-        <div className="animate-spin w-8 h-8 border-4 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
-
   if (!isSupabaseConfigured) {
     return (
       <div className="flex h-screen items-center justify-center">
@@ -410,12 +419,8 @@ export default function Generate() {
     );
   }
 
-  if (!user) {
-    return null;
-  }
-
-  const userName = profile?.name || user.user_metadata?.full_name || user.email;
-  const userAvatar = profile?.avatar_url || user.user_metadata?.avatar_url;
+  const userName = profile?.name || user?.user_metadata?.full_name || user?.email;
+  const userAvatar = profile?.avatar_url || user?.user_metadata?.avatar_url;
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -782,39 +787,52 @@ export default function Generate() {
       <header className="border-b bg-background">
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
-            <Link href="/dashboard">
-              <div className="flex items-center gap-2 cursor-pointer">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-                  <Sparkles className="h-5 w-5 text-primary-foreground" />
-                </div>
-                <span className="text-xl font-semibold tracking-tight">Claude Menu</span>
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
+                <Sparkles className="h-5 w-5 text-primary-foreground" />
               </div>
-            </Link>
+              <span className="text-xl font-semibold tracking-tight">Claude Menu</span>
+            </div>
             <div className="flex items-center gap-4">
-              <Link href="/dashboard">
-                <Button variant="ghost" data-testid="button-dashboard">
-                  Dashboard
-                </Button>
-              </Link>
-              <ThemeToggle />
-              <div className="flex items-center gap-2">
-                {userAvatar && (
-                  <img
-                    src={userAvatar}
-                    alt={userName || "User"}
-                    className="h-8 w-8 rounded-full object-cover"
-                  />
-                )}
-                <span className="text-sm font-medium hidden sm:inline">{userName}</span>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleSignOut}
-                data-testid="button-logout"
-              >
-                <LogOut className="h-4 w-4" />
-              </Button>
+              {isAuthenticated ? (
+                <>
+                  <Link href="/dashboard">
+                    <Button variant="ghost" data-testid="button-dashboard">
+                      Dashboard
+                    </Button>
+                  </Link>
+                  <ThemeToggle />
+                  <div className="flex items-center gap-2">
+                    {userAvatar && (
+                      <img
+                        src={userAvatar}
+                        alt={userName || "User"}
+                        className="h-8 w-8 rounded-full object-cover"
+                      />
+                    )}
+                    <span className="text-sm font-medium hidden sm:inline">{userName}</span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={handleSignOut}
+                    data-testid="button-logout"
+                  >
+                    <LogOut className="h-4 w-4" />
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <ThemeToggle />
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowLoginDialog(true)}
+                    data-testid="button-signin"
+                  >
+                    Sign In
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -851,7 +869,7 @@ export default function Generate() {
             {isLastStep ? (
               <Button
                 size="lg"
-                onClick={handleGenerate}
+                onClick={handleGenerateClick}
                 disabled={!canProceed() || isGenerating}
                 data-testid="button-generate"
               >
@@ -881,10 +899,42 @@ export default function Generate() {
         
         {isLastStep && (
           <p className="text-center text-sm text-muted-foreground mt-4">
-            Generation is free! You'll get a professional menu design.
+            {isAuthenticated 
+              ? "Generate your professional menu design" 
+              : "Sign in to generate your first menu for free"}
           </p>
         )}
       </div>
+
+      <Dialog open={showLoginDialog} onOpenChange={setShowLoginDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Sign in to continue</DialogTitle>
+            <DialogDescription>
+              Create your free account to generate your first menu design
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col gap-4 py-4">
+            <Button
+              size="lg"
+              onClick={handleGoogleSignIn}
+              disabled={isSigningIn}
+              className="w-full"
+              data-testid="button-google-signin"
+            >
+              {isSigningIn ? (
+                <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+              ) : (
+                <SiGoogle className="h-5 w-5 mr-2" />
+              )}
+              Continue with Google
+            </Button>
+            <p className="text-xs text-center text-muted-foreground">
+              By signing in, you agree to our Terms of Service and Privacy Policy
+            </p>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
