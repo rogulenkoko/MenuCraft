@@ -83,6 +83,7 @@ export interface ISupabaseStorage {
   activateUser(userId: string, stripeCustomerId: string): Promise<boolean>;
   addCredits(userId: string, credits: number): Promise<boolean>;
   useCredit(userId: string): Promise<boolean>;
+  incrementTotalGenerated(userId: string): Promise<boolean>;
   getCreditsStatus(userId: string): Promise<{ hasActivated: boolean; menuCredits: number; totalGenerated: number } | null>;
   
   createMenuGeneration(generation: InsertMenuGeneration): Promise<MenuGeneration | null>;
@@ -339,6 +340,35 @@ class SupabaseStorage implements ISupabaseStorage {
     }
 
     console.log(`Used 1 credit for user ${userId}, remaining: ${profile.menu_credits - 1}`);
+    return true;
+  }
+
+  async incrementTotalGenerated(userId: string): Promise<boolean> {
+    if (!this.client) {
+      console.warn('Supabase admin client not configured');
+      return false;
+    }
+
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      console.error('Profile not found for incrementing total generated');
+      return false;
+    }
+
+    const { error } = await this.client
+      .from('profiles')
+      .update({
+        total_generated: (profile.total_generated || 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Error incrementing total generated:', error);
+      return false;
+    }
+
+    console.log(`Incremented total_generated for user ${userId} to ${(profile.total_generated || 0) + 1}`);
     return true;
   }
 

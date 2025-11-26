@@ -141,8 +141,8 @@ function isPaymentRequired(): boolean {
   return process.env.PAYMENT_REQUIRED !== 'false';
 }
 
-// Helper to check if user can generate menus (has credits)
-async function checkCanGenerate(userId: string): Promise<{ canGenerate: boolean; profile: any; reason?: string }> {
+// Helper to check if user can generate menus (has credits or first free generation)
+async function checkCanGenerate(userId: string): Promise<{ canGenerate: boolean; profile: any; reason?: string; isFreeGeneration?: boolean }> {
   // If payments not required, grant access to everyone
   if (!isPaymentRequired()) {
     const profile = await supabaseStorage.getProfile(userId);
@@ -155,9 +155,14 @@ async function checkCanGenerate(userId: string): Promise<{ canGenerate: boolean;
     return { canGenerate: false, profile: null, reason: 'Profile not found' };
   }
   
-  // Check if user has activated and has credits
+  // Allow first free generation for new users (even if not activated)
+  if ((profile.total_generated || 0) === 0) {
+    return { canGenerate: true, profile, isFreeGeneration: true };
+  }
+  
+  // For subsequent generations, check if user has activated and has credits
   if (!profile.has_activated) {
-    return { canGenerate: false, profile, reason: 'Account not activated. Please purchase an activation to start generating menus.' };
+    return { canGenerate: false, profile, reason: 'Your free menu has been generated! Activate your account to generate more menus and download them.' };
   }
   
   if ((profile.menu_credits || 0) <= 0) {
@@ -849,12 +854,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.supabaseUser.id;
       
-      // Check if user can generate (has credits)
-      const { canGenerate, reason } = await checkCanGenerate(userId);
+      // Check if user can generate (has credits or free generation)
+      const { canGenerate, reason, isFreeGeneration } = await checkCanGenerate(userId);
       if (!canGenerate) {
         return res.status(403).json({ 
           message: reason || 'Cannot generate menu',
-          needsActivation: reason?.includes('not activated'),
+          needsActivation: reason?.includes('Activate'),
           needsCredits: reason?.includes('No credits'),
         });
       }
@@ -878,17 +883,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Missing required fields" });
       }
 
-      console.log(`Generating menu designs for user: ${req.supabaseUser?.email || req.supabaseUser?.id}`);
+      console.log(`Generating menu designs for user: ${req.supabaseUser?.email || req.supabaseUser?.id}${isFreeGeneration ? ' (FREE generation)' : ''}`);
       
-      // Use a credit before generating
-      const creditUsed = await supabaseStorage.useCredit(userId);
-      if (!creditUsed) {
-        return res.status(403).json({ 
-          message: 'Failed to use credit. Please check your credit balance.',
-          needsCredits: true,
-        });
+      // Only use a credit if this is NOT a free generation
+      if (!isFreeGeneration && isPaymentRequired()) {
+        const creditUsed = await supabaseStorage.useCredit(userId);
+        if (!creditUsed) {
+          return res.status(403).json({ 
+            message: 'Failed to use credit. Please check your credit balance.',
+            needsCredits: true,
+          });
+        }
+        console.log(`Used 1 credit for user ${userId}`);
+      } else if (isFreeGeneration) {
+        // For free generation, just increment total_generated
+        await supabaseStorage.incrementTotalGenerated(userId);
+        console.log(`Free generation used for user ${userId}`);
       }
-      console.log(`Used 1 credit for user ${userId}`);
 
       // Generate AI designs synchronously
       const htmlVariations = await generateMenuDesigns({
