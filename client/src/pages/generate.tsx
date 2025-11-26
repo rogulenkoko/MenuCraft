@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,9 @@ import { SiGoogle } from "react-icons/si";
 import { Link, useLocation } from "wouter";
 import { useDropzone } from "react-dropzone";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+
+const FORM_STATE_KEY = "claude_menu_form_state";
+const PENDING_GENERATION_KEY = "claude_menu_pending_generation";
 
 const THEME_PRESETS = [
   { id: "minimalism", name: "Minimalism", description: "Clean, simple, elegant" },
@@ -54,10 +57,28 @@ type WizardStep = "content" | "name" | "slogan" | "theme" | "colors" | "fonts" |
 
 const STEPS: WizardStep[] = ["content", "name", "slogan", "theme", "colors", "fonts", "layout", "size", "description"];
 
+interface FormState {
+  inputMethod: "file" | "text";
+  extractedText: string;
+  manualText: string;
+  fileName: string | null;
+  restaurantName: string;
+  slogan: string;
+  selectedThemes: string[];
+  customThemeDescription: string;
+  selectedPalette: string;
+  customColors: string[];
+  selectedFont: string;
+  selectedLayout: string;
+  size: string;
+  generalDescription: string;
+}
+
 export default function Generate() {
   const { toast } = useToast();
-  const { user, profile, session, isAuthenticated, signOut, signInWithGoogle } = useSupabaseAuth();
+  const { user, profile, session, isAuthenticated, isLoading, signOut, signInWithGoogle } = useSupabaseAuth();
   const [, setLocation] = useLocation();
+  const hasTriggeredAutoGenerate = useRef(false);
 
   const [currentStep, setCurrentStep] = useState<WizardStep>("content");
   const [showLoginDialog, setShowLoginDialog] = useState(false);
@@ -81,6 +102,84 @@ export default function Generate() {
   const [generalDescription, setGeneralDescription] = useState("");
   
   const [isGenerating, setIsGenerating] = useState(false);
+
+  // Restore form state from localStorage on mount
+  useEffect(() => {
+    try {
+      const savedState = localStorage.getItem(FORM_STATE_KEY);
+      if (savedState) {
+        const state: FormState = JSON.parse(savedState);
+        setInputMethod(state.inputMethod);
+        setExtractedText(state.extractedText);
+        setManualText(state.manualText);
+        setRestaurantName(state.restaurantName);
+        setSlogan(state.slogan);
+        setSelectedThemes(state.selectedThemes);
+        setCustomThemeDescription(state.customThemeDescription);
+        setSelectedPalette(state.selectedPalette);
+        setCustomColors(state.customColors);
+        setSelectedFont(state.selectedFont);
+        setSelectedLayout(state.selectedLayout);
+        setSize(state.size);
+        setGeneralDescription(state.generalDescription);
+        
+        // If we have a pending generation, go to final step
+        const pendingGeneration = localStorage.getItem(PENDING_GENERATION_KEY);
+        if (pendingGeneration === "true") {
+          setCurrentStep("description");
+        }
+      }
+    } catch (error) {
+      console.error("Error restoring form state:", error);
+    }
+  }, []);
+
+  // Auto-generate when user authenticates after requesting generation
+  useEffect(() => {
+    const pendingGeneration = localStorage.getItem(PENDING_GENERATION_KEY);
+    
+    if (
+      pendingGeneration === "true" && 
+      isAuthenticated && 
+      !isLoading && 
+      session && 
+      user &&
+      !hasTriggeredAutoGenerate.current &&
+      !isGenerating
+    ) {
+      hasTriggeredAutoGenerate.current = true;
+      // Don't clear pending flag here - it will be cleared after successful generation
+      // This way if generation fails, user can retry
+      handleGenerate();
+    }
+  }, [isAuthenticated, isLoading, session, user]);
+
+  // Save form state to localStorage
+  const saveFormState = () => {
+    const state: FormState = {
+      inputMethod,
+      extractedText,
+      manualText,
+      fileName: file?.name || null,
+      restaurantName,
+      slogan,
+      selectedThemes,
+      customThemeDescription,
+      selectedPalette,
+      customColors,
+      selectedFont,
+      selectedLayout,
+      size,
+      generalDescription,
+    };
+    localStorage.setItem(FORM_STATE_KEY, JSON.stringify(state));
+  };
+
+  // Clear saved form state
+  const clearFormState = () => {
+    localStorage.removeItem(FORM_STATE_KEY);
+    localStorage.removeItem(PENDING_GENERATION_KEY);
+  };
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -300,6 +399,9 @@ export default function Generate() {
 
   const handleGenerateClick = () => {
     if (!isAuthenticated) {
+      // Save form state before login
+      saveFormState();
+      localStorage.setItem(PENDING_GENERATION_KEY, "true");
       setShowLoginDialog(true);
       return;
     }
@@ -389,6 +491,9 @@ export default function Generate() {
         }
       }
 
+      // Clear saved form state after successful generation
+      clearFormState();
+      
       toast({
         title: "Success",
         description: "Your menu design is ready!",
@@ -405,6 +510,35 @@ export default function Generate() {
       setIsGenerating(false);
     }
   };
+
+  // Show full-screen generating state
+  if (isGenerating) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="text-center max-w-md px-6">
+          <div className="flex items-center justify-center gap-2 mb-8">
+            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary">
+              <Sparkles className="h-6 w-6 text-primary-foreground" />
+            </div>
+            <span className="text-2xl font-semibold tracking-tight">Claude Menu</span>
+          </div>
+          
+          <div className="relative mb-8">
+            <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto" />
+            <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 h-6 w-6 text-primary animate-pulse" />
+          </div>
+          
+          <h2 className="text-2xl font-semibold mb-3">Creating Your Menu</h2>
+          <p className="text-muted-foreground mb-2">
+            Our AI is designing a beautiful, professional menu just for you.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            This usually takes about 20-30 seconds...
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isSupabaseConfigured) {
     return (

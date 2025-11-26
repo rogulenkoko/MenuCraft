@@ -50,11 +50,18 @@ export default function AuthCallback() {
           return;
         }
 
+        // Check if there's a pending menu generation
+        const pendingGeneration = localStorage.getItem('claude_menu_pending_generation');
+        const redirectPath = pendingGeneration === 'true' ? '/' : '/dashboard';
+        const redirectMessage = pendingGeneration === 'true' 
+          ? 'Success! Starting menu generation...' 
+          : 'Success! Redirecting to dashboard...';
+
         if (session) {
-          setStatus('Success! Redirecting to dashboard...');
+          setStatus(redirectMessage);
           // Clear the URL params before redirecting
           window.history.replaceState(null, '', '/auth/callback');
-          setTimeout(() => setLocation('/dashboard'), 500);
+          setTimeout(() => setLocation(redirectPath), 500);
         } else {
           // Try to exchange the code if present
           const code = urlParams.get('code');
@@ -70,9 +77,9 @@ export default function AuthCallback() {
             }
             
             if (data?.session) {
-              setStatus('Success! Redirecting to dashboard...');
+              setStatus(redirectMessage);
               window.history.replaceState(null, '', '/auth/callback');
-              setTimeout(() => setLocation('/dashboard'), 500);
+              setTimeout(() => setLocation(redirectPath), 500);
               return;
             }
           }
