@@ -88,6 +88,40 @@ async function getOrCreateCreditProduct(): Promise<string> {
   return creditProductId;
 }
 
+// Legacy subscription price (kept for backwards compatibility)
+let subscriptionPriceId: string | null = null;
+async function getSubscriptionPrice(): Promise<string> {
+  if (!stripe) throw new Error('Stripe not configured');
+  if (subscriptionPriceId) return subscriptionPriceId;
+  
+  // Search for existing subscription price
+  const prices = await stripe.prices.search({
+    query: "product.name:'Claude Menu Pro'",
+    limit: 1,
+  });
+  
+  if (prices.data.length > 0) {
+    subscriptionPriceId = prices.data[0].id;
+    return subscriptionPriceId;
+  }
+  
+  // Create product and price for subscription
+  const product = await stripe.products.create({
+    name: 'Claude Menu Pro',
+    description: 'Monthly subscription for Claude Menu',
+  });
+  
+  const price = await stripe.prices.create({
+    product: product.id,
+    unit_amount: 999, // $9.99/month
+    currency: 'usd',
+    recurring: { interval: 'month' },
+  });
+  
+  subscriptionPriceId = price.id;
+  return subscriptionPriceId;
+}
+
 // Initialize Anthropic
 if (!process.env.ANTHROPIC_API_KEY) {
   throw new Error('Missing required Anthropic API key: ANTHROPIC_API_KEY');
@@ -349,6 +383,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Stripe Customer Portal - Simple portal access by email
   app.post('/api/stripe/portal', async (req: any, res) => {
     try {
+      if (!stripe) {
+        return res.status(400).json({ message: "Stripe not configured" });
+      }
+
       const { returnUrl, email } = req.body;
       const baseUrl = returnUrl || `https://${req.headers.host}`;
 
@@ -384,6 +422,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Sync subscription status from Stripe - called after checkout redirect
   app.post('/api/stripe/sync-subscription', verifySupabaseToken, async (req: any, res) => {
     try {
+      if (!stripe) {
+        return res.status(400).json({ message: "Stripe not configured" });
+      }
+
       const userId = req.supabaseUser.id;
       const userEmail = req.supabaseUser.email;
       
@@ -484,9 +526,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Create subscription route - uses Supabase auth
+  // Create subscription route - uses Supabase auth (legacy - kept for backwards compatibility)
   app.post('/api/create-subscription', verifySupabaseToken, async (req: any, res) => {
     try {
+      if (!stripe) {
+        return res.status(400).json({ message: "Stripe not configured" });
+      }
+
       const userId = req.supabaseUser.id;
       let profile = await supabaseStorage.getProfile(userId);
 
@@ -598,6 +644,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     let event;
 
     try {
+      // Stripe must be configured for webhook processing
+      if (!stripe) {
+        return res.status(500).send('Stripe not configured');
+      }
+      
       // Use raw body for signature verification
       const rawBody = (req as any).rawBody || req.body;
       event = stripe.webhooks.constructEvent(
@@ -658,6 +709,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
         // Keep for backwards compatibility with existing subscriptions
+        if (!stripe) break;
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
         
@@ -672,6 +724,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       case 'customer.subscription.deleted': {
         // Keep for backwards compatibility
+        if (!stripe) break;
         const deletedSubscription = event.data.object as Stripe.Subscription;
         const deletedCustomerId = deletedSubscription.customer as string;
         
