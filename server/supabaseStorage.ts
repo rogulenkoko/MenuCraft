@@ -32,8 +32,18 @@ export interface Profile {
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   subscription_status: string | null;
+  has_activated: boolean;
+  menu_credits: number;
+  total_generated: number;
   created_at: string;
   updated_at: string;
+}
+
+export interface InsertProfile {
+  id: string;
+  email?: string | null;
+  name?: string | null;
+  avatar_url?: string | null;
 }
 
 export interface MenuGeneration {
@@ -66,8 +76,14 @@ export interface ISupabaseStorage {
   getProfile(id: string): Promise<Profile | null>;
   getProfileByEmail(email: string): Promise<Profile | null>;
   getProfileByStripeCustomer(stripeCustomerId: string): Promise<Profile | null>;
+  createProfile(profile: InsertProfile): Promise<Profile | null>;
   updateProfileStripeInfo(email: string, stripeCustomerId: string, stripeSubscriptionId: string, subscriptionStatus: string): Promise<boolean>;
   updateProfileStripeInfoById(userId: string, stripeCustomerId: string, stripeSubscriptionId: string, subscriptionStatus: string): Promise<boolean>;
+  
+  activateUser(userId: string, stripeCustomerId: string): Promise<boolean>;
+  addCredits(userId: string, credits: number): Promise<boolean>;
+  useCredit(userId: string): Promise<boolean>;
+  getCreditsStatus(userId: string): Promise<{ hasActivated: boolean; menuCredits: number; totalGenerated: number } | null>;
   
   createMenuGeneration(generation: InsertMenuGeneration): Promise<MenuGeneration | null>;
   getMenuGeneration(id: string): Promise<MenuGeneration | null>;
@@ -207,6 +223,136 @@ class SupabaseStorage implements ISupabaseStorage {
 
     console.log(`Updated profile ID ${userId} with subscription status: ${subscriptionStatus}`);
     return true;
+  }
+
+  async createProfile(profile: InsertProfile): Promise<Profile | null> {
+    if (!this.client) {
+      console.warn('Supabase admin client not configured');
+      return null;
+    }
+
+    const { data, error } = await this.client
+      .from('profiles')
+      .insert({
+        id: profile.id,
+        email: profile.email || null,
+        name: profile.name || null,
+        avatar_url: profile.avatar_url || null,
+        has_activated: false,
+        menu_credits: 0,
+        total_generated: 0,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error creating profile:', error);
+      return null;
+    }
+
+    return data;
+  }
+
+  async activateUser(userId: string, stripeCustomerId: string): Promise<boolean> {
+    if (!this.client) {
+      console.warn('Supabase admin client not configured');
+      return false;
+    }
+
+    const { error } = await this.client
+      .from('profiles')
+      .update({
+        has_activated: true,
+        menu_credits: 5,
+        stripe_customer_id: stripeCustomerId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Error activating user:', error);
+      return false;
+    }
+
+    console.log(`Activated user ${userId} with 5 credits`);
+    return true;
+  }
+
+  async addCredits(userId: string, credits: number): Promise<boolean> {
+    if (!this.client) {
+      console.warn('Supabase admin client not configured');
+      return false;
+    }
+
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      console.error('Profile not found for adding credits');
+      return false;
+    }
+
+    const { error } = await this.client
+      .from('profiles')
+      .update({
+        menu_credits: (profile.menu_credits || 0) + credits,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Error adding credits:', error);
+      return false;
+    }
+
+    console.log(`Added ${credits} credits to user ${userId}`);
+    return true;
+  }
+
+  async useCredit(userId: string): Promise<boolean> {
+    if (!this.client) {
+      console.warn('Supabase admin client not configured');
+      return false;
+    }
+
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      console.error('Profile not found for using credit');
+      return false;
+    }
+
+    if (profile.menu_credits <= 0) {
+      console.error('No credits available');
+      return false;
+    }
+
+    const { error } = await this.client
+      .from('profiles')
+      .update({
+        menu_credits: profile.menu_credits - 1,
+        total_generated: (profile.total_generated || 0) + 1,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Error using credit:', error);
+      return false;
+    }
+
+    console.log(`Used 1 credit for user ${userId}, remaining: ${profile.menu_credits - 1}`);
+    return true;
+  }
+
+  async getCreditsStatus(userId: string): Promise<{ hasActivated: boolean; menuCredits: number; totalGenerated: number } | null> {
+    const profile = await this.getProfile(userId);
+    if (!profile) {
+      return null;
+    }
+
+    return {
+      hasActivated: profile.has_activated || false,
+      menuCredits: profile.menu_credits || 0,
+      totalGenerated: profile.total_generated || 0,
+    };
   }
 
   async createMenuGeneration(generation: InsertMenuGeneration): Promise<MenuGeneration | null> {

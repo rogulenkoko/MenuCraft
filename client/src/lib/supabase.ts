@@ -33,6 +33,9 @@ export type Database = {
           stripe_customer_id: string | null;
           stripe_subscription_id: string | null;
           subscription_status: string | null;
+          has_activated: boolean;
+          menu_credits: number;
+          total_generated: number;
           created_at: string;
           updated_at: string;
         };
@@ -44,6 +47,9 @@ export type Database = {
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
           subscription_status?: string | null;
+          has_activated?: boolean;
+          menu_credits?: number;
+          total_generated?: number;
         };
         Update: {
           email?: string | null;
@@ -52,6 +58,9 @@ export type Database = {
           stripe_customer_id?: string | null;
           stripe_subscription_id?: string | null;
           subscription_status?: string | null;
+          has_activated?: boolean;
+          menu_credits?: number;
+          total_generated?: number;
         };
       };
       menu_generations: {

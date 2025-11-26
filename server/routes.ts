@@ -23,38 +23,60 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
   apiVersion: "2023-10-16",
 });
 
-// Create or retrieve the subscription price
-// In production, this should be a configured price ID
-const CLAUDE_MENU_PRO_PRICE_ID = process.env.STRIPE_PRICE_ID || null;
-let cachedPriceId: string | null = null;
+// Pricing constants
+const ACTIVATION_PRICE_CENTS = 1000; // $10 one-time activation
+const CREDIT_PRICE_CENTS = 100; // $1 per credit
 
-async function getSubscriptionPrice(): Promise<string> {
-  // Use configured price if available
-  if (CLAUDE_MENU_PRO_PRICE_ID) {
-    return CLAUDE_MENU_PRO_PRICE_ID;
+// Cached Stripe product IDs for one-time payments
+let activationProductId: string | null = null;
+let creditProductId: string | null = null;
+
+async function getOrCreateActivationProduct(): Promise<string> {
+  if (activationProductId) return activationProductId;
+  
+  // Try to find existing product
+  const products = await stripe.products.search({
+    query: "name:'Claude Menu Activation'",
+    limit: 1,
+  });
+  
+  if (products.data.length > 0) {
+    activationProductId = products.data[0].id;
+    return activationProductId;
   }
   
-  // Return cached price if already created
-  if (cachedPriceId) {
-    return cachedPriceId;
-  }
-  
-  // Create product first, then price (for development)
+  // Create new product
   const product = await stripe.products.create({
-    name: 'Claude Menu Pro',
+    name: 'Claude Menu Activation',
+    description: 'One-time activation fee for Claude Menu - includes unlimited downloads + 5 menu generation credits',
   });
   
-  const price = await stripe.prices.create({
-    currency: 'usd',
-    unit_amount: 2900, // $29.00
-    recurring: {
-      interval: 'month',
-    },
-    product: product.id,
+  activationProductId = product.id;
+  return activationProductId;
+}
+
+async function getOrCreateCreditProduct(): Promise<string> {
+  if (creditProductId) return creditProductId;
+  
+  // Try to find existing product
+  const products = await stripe.products.search({
+    query: "name:'Claude Menu Credit'",
+    limit: 1,
   });
   
-  cachedPriceId = price.id;
-  return price.id;
+  if (products.data.length > 0) {
+    creditProductId = products.data[0].id;
+    return creditProductId;
+  }
+  
+  // Create new product
+  const product = await stripe.products.create({
+    name: 'Claude Menu Credit',
+    description: 'Menu generation credit for Claude Menu',
+  });
+  
+  creditProductId = product.id;
+  return creditProductId;
 }
 
 // Initialize Anthropic
