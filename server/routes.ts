@@ -287,14 +287,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`Development bypass: Creating subscription with immediate 'active' status for user ${userId}`);
       }
       
-      // Update profile with Stripe info
-      if (profile.email) {
-        await supabaseStorage.updateProfileStripeInfo(
-          profile.email,
-          customerId,
-          subscription.id,
-          initialStatus
-        );
+      // Update profile with Stripe info using user ID (more reliable than email)
+      const updateSuccess = await supabaseStorage.updateProfileStripeInfoById(
+        userId,
+        customerId,
+        subscription.id,
+        initialStatus
+      );
+      
+      if (!updateSuccess) {
+        console.error(`Failed to update profile stripe info for user ${userId}`);
       }
 
       const invoice = subscription.latest_invoice as Stripe.Invoice;

@@ -1,10 +1,14 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.VITE_SUPABASE_URL;
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 if (!supabaseUrl) {
-  console.warn('VITE_SUPABASE_URL not configured');
+  console.error('ERROR: SUPABASE_URL or VITE_SUPABASE_URL not configured');
+}
+
+if (!supabaseServiceKey) {
+  console.error('ERROR: SUPABASE_SERVICE_ROLE_KEY not configured');
 }
 
 export const supabaseAdmin: SupabaseClient | null = supabaseUrl && supabaseServiceKey 
@@ -15,6 +19,10 @@ export const supabaseAdmin: SupabaseClient | null = supabaseUrl && supabaseServi
       },
     })
   : null;
+
+if (!supabaseAdmin) {
+  console.error('CRITICAL: Supabase admin client could not be initialized. Database operations will fail.');
+}
 
 export interface Profile {
   id: string;
@@ -59,6 +67,7 @@ export interface ISupabaseStorage {
   getProfileByEmail(email: string): Promise<Profile | null>;
   getProfileByStripeCustomer(stripeCustomerId: string): Promise<Profile | null>;
   updateProfileStripeInfo(email: string, stripeCustomerId: string, stripeSubscriptionId: string, subscriptionStatus: string): Promise<boolean>;
+  updateProfileStripeInfoById(userId: string, stripeCustomerId: string, stripeSubscriptionId: string, subscriptionStatus: string): Promise<boolean>;
   
   createMenuGeneration(generation: InsertMenuGeneration): Promise<MenuGeneration | null>;
   getMenuGeneration(id: string): Promise<MenuGeneration | null>;
@@ -167,6 +176,36 @@ class SupabaseStorage implements ISupabaseStorage {
     }
 
     console.log(`Updated profile for ${email} with subscription status: ${subscriptionStatus}`);
+    return true;
+  }
+
+  async updateProfileStripeInfoById(
+    userId: string,
+    stripeCustomerId: string,
+    stripeSubscriptionId: string,
+    subscriptionStatus: string
+  ): Promise<boolean> {
+    if (!this.client) {
+      console.warn('Supabase admin client not configured');
+      return false;
+    }
+
+    const { error } = await this.client
+      .from('profiles')
+      .update({
+        stripe_customer_id: stripeCustomerId,
+        stripe_subscription_id: stripeSubscriptionId,
+        subscription_status: subscriptionStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userId);
+
+    if (error) {
+      console.error('Error updating profile stripe info by ID:', error);
+      return false;
+    }
+
+    console.log(`Updated profile ID ${userId} with subscription status: ${subscriptionStatus}`);
     return true;
   }
 
