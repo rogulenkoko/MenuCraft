@@ -1,23 +1,47 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
 import { useSubscription } from "@/hooks/useSubscription";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, FileText, Clock, LogOut, Plus } from "lucide-react";
-import { Link, useLocation } from "wouter";
+import { Sparkles, FileText, Clock, LogOut, Plus, CheckCircle } from "lucide-react";
+import { Link, useLocation, useSearch } from "wouter";
 import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
 import { format } from "date-fns";
 
 export default function Dashboard() {
   const { toast } = useToast();
   const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
-  const { hasActiveSubscription, subscriptionRequired, canDownload } = useSubscription();
+  const { hasActiveSubscription, subscriptionRequired, canDownload, refreshSubscription } = useSubscription();
   const [, setLocation] = useLocation();
+  const search = useSearch();
+  const successToastShown = useRef(false);
 
   const [generations, setGenerations] = useState<MenuGeneration[]>([]);
   const [generationsLoading, setGenerationsLoading] = useState(true);
+  const [showSuccessBanner, setShowSuccessBanner] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(search);
+    const subscriptionParam = params.get('subscription');
+    const storedSuccess = localStorage.getItem('subscription_success');
+    
+    if ((subscriptionParam === 'success' || storedSuccess === 'true') && !successToastShown.current) {
+      successToastShown.current = true;
+      setShowSuccessBanner(true);
+      toast({
+        title: "Payment Successful!",
+        description: "Thank you for subscribing to Claude Menu Pro!",
+      });
+      refreshSubscription?.();
+      localStorage.removeItem('subscription_success');
+      if (subscriptionParam) {
+        localStorage.setItem('subscription_success', 'true');
+        window.history.replaceState({}, '', '/dashboard');
+      }
+    }
+  }, [search, toast, refreshSubscription]);
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated && isSupabaseReady) {
@@ -140,6 +164,30 @@ export default function Dashboard() {
       </header>
 
       <div className="mx-auto max-w-7xl px-6 py-12">
+        {showSuccessBanner && (
+          <Card className="mb-8 p-4 bg-green-50 dark:bg-green-950 border-green-200 dark:border-green-800">
+            <div className="flex items-center gap-3">
+              <CheckCircle className="h-6 w-6 text-green-600 dark:text-green-400" />
+              <div>
+                <h3 className="font-semibold text-green-800 dark:text-green-200">
+                  Payment Successful!
+                </h3>
+                <p className="text-sm text-green-700 dark:text-green-300">
+                  Thank you for subscribing to Claude Menu Pro. You now have full access to all features.
+                </p>
+              </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                className="ml-auto" 
+                onClick={() => setShowSuccessBanner(false)}
+              >
+                Dismiss
+              </Button>
+            </div>
+          </Card>
+        )}
+
         <div className="mb-12">
           <h1 className="text-4xl font-semibold mb-8" data-testid="text-dashboard-title">
             Dashboard

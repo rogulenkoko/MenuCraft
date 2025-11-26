@@ -86,14 +86,76 @@ export function useSupabaseAuth() {
 
     let isMounted = true;
 
-    const initAuth = async () => {
-      console.log('[Auth] Calling getSession...');
+    const initAuth = async (retryCount = 0) => {
+      const maxRetries = 2;
+      console.log(`[Auth] Calling getSession... (attempt ${retryCount + 1}/${maxRetries + 1})`);
+      
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      console.log(`[Auth] Supabase URL: ${supabaseUrl?.substring(0, 30)}...`);
+      
       try {
+        const startTime = Date.now();
+        
+        // Try to get session from localStorage first (faster than API call)
+        const storageKey = `sb-${supabaseUrl?.split('//')[1]?.split('.')[0]}-auth-token`;
+        console.log(`[Auth] Checking localStorage key: ${storageKey}`);
+        
+        const storedSession = localStorage.getItem(storageKey);
+        if (storedSession) {
+          try {
+            const parsed = JSON.parse(storedSession);
+            console.log(`[Auth] Found stored session, expires: ${new Date(parsed.expires_at * 1000).toISOString()}`);
+            
+            // Check if session is still valid
+            if (parsed.expires_at * 1000 > Date.now()) {
+              console.log('[Auth] Session still valid, using stored session');
+              
+              // Create user object from stored session
+              const user = parsed.user;
+              if (user) {
+                let profile = null;
+                try {
+                  profile = await createOrUpdateProfile(user);
+                } catch (profileError) {
+                  console.error('[Auth] Profile fetch error:', profileError);
+                }
+                
+                if (!isMounted) return;
+                
+                setAuthState({
+                  user,
+                  profile,
+                  session: parsed,
+                  isLoading: false,
+                  isAuthenticated: true,
+                  isSupabaseReady: true,
+                });
+                return;
+              }
+            } else {
+              console.log('[Auth] Stored session expired');
+            }
+          } catch (parseError) {
+            console.error('[Auth] Error parsing stored session:', parseError);
+          }
+        } else {
+          console.log('[Auth] No stored session found');
+        }
+        
+        console.log('[Auth] Starting getSession call...');
+        
         const timeoutPromise = new Promise<never>((_, reject) => 
-          setTimeout(() => reject(new Error('Auth request timeout after 10s')), 10000)
+          setTimeout(() => {
+            console.log(`[Auth] Timeout triggered after ${Date.now() - startTime}ms`);
+            reject(new Error('Auth request timeout after 15s'));
+          }, 15000)
         );
         
-        const sessionPromise = supabase.auth.getSession();
+        const sessionPromise = supabase.auth.getSession().then(result => {
+          console.log(`[Auth] getSession resolved after ${Date.now() - startTime}ms`);
+          return result;
+        });
+        
         const result = await Promise.race([sessionPromise, timeoutPromise]);
         
         const { data, error } = result;
@@ -141,6 +203,14 @@ export function useSupabaseAuth() {
       } catch (error: any) {
         console.error('[Auth] Auth initialization error:', error?.message || error);
         if (!isMounted) return;
+        
+        if (retryCount < maxRetries) {
+          console.log(`[Auth] Retrying... (${retryCount + 1}/${maxRetries})`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          return initAuth(retryCount + 1);
+        }
+        
+        console.error('[Auth] All retries failed, setting unauthenticated state');
         setAuthState({
           user: null,
           profile: null,
@@ -152,7 +222,7 @@ export function useSupabaseAuth() {
       }
     };
 
-    initAuth();
+    initAuth(0);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {

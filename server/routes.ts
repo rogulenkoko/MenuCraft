@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
 import { verifySupabaseToken } from "./supabaseAuth";
+import { updateSupabaseProfile } from "./supabaseAdmin";
 import Stripe from "stripe";
 import Anthropic from '@anthropic-ai/sdk';
 import multer from "multer";
@@ -372,12 +373,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Handle the event
     switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const customerEmail = session.customer_email || session.customer_details?.email;
+        const customerId = session.customer as string;
+        const subscriptionId = session.subscription as string;
+        
+        console.log(`Checkout completed for ${customerEmail}, subscription: ${subscriptionId}`);
+        
+        if (customerEmail && subscriptionId) {
+          await updateSupabaseProfile(customerEmail, customerId, subscriptionId, 'active');
+        }
+        break;
+      }
+
       case 'customer.subscription.created':
-      case 'customer.subscription.updated':
+      case 'customer.subscription.updated': {
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
         
-        // Find user by Stripe customer ID
+        const customer = await stripe.customers.retrieve(customerId);
+        const customerEmail = (customer as Stripe.Customer).email;
+        
+        if (customerEmail) {
+          await updateSupabaseProfile(customerEmail, customerId, subscription.id, subscription.status);
+        }
+        
         const users = await storage.getUserByStripeCustomer(customerId);
         if (users) {
           await storage.updateUserStripeInfo(
@@ -388,10 +409,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
         break;
+      }
 
-      case 'customer.subscription.deleted':
+      case 'customer.subscription.deleted': {
         const deletedSubscription = event.data.object as Stripe.Subscription;
         const deletedCustomerId = deletedSubscription.customer as string;
+        
+        const deletedCustomer = await stripe.customers.retrieve(deletedCustomerId);
+        const deletedEmail = (deletedCustomer as Stripe.Customer).email;
+        
+        if (deletedEmail) {
+          await updateSupabaseProfile(deletedEmail, deletedCustomerId, deletedSubscription.id, 'canceled');
+        }
         
         const deletedUsers = await storage.getUserByStripeCustomer(deletedCustomerId);
         if (deletedUsers) {
@@ -403,14 +432,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
           );
         }
         break;
+      }
 
-      case 'invoice.payment_succeeded':
+      case 'invoice.payment_succeeded': {
         const invoice = event.data.object as Stripe.Invoice;
         const subscriptionId = invoice.subscription as string;
         
         if (subscriptionId) {
           const sub = await stripe.subscriptions.retrieve(subscriptionId);
           const invoiceCustomerId = sub.customer as string;
+          
+          const invoiceCustomer = await stripe.customers.retrieve(invoiceCustomerId);
+          const invoiceEmail = (invoiceCustomer as Stripe.Customer).email;
+          
+          if (invoiceEmail) {
+            await updateSupabaseProfile(invoiceEmail, invoiceCustomerId, subscriptionId, 'active');
+          }
           
           const invoiceUsers = await storage.getUserByStripeCustomer(invoiceCustomerId);
           if (invoiceUsers) {
@@ -423,6 +460,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         break;
+      }
 
       default:
         console.log(`Unhandled event type ${event.type}`);
