@@ -452,9 +452,9 @@ export default function Dashboard() {
       </header>
 
       {/* Main content */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex min-h-0 overflow-hidden">
         {/* Left sidebar - Menu list (hidden on mobile when viewing editor) */}
-        <div className={`${mobileView === 'list' ? 'flex' : 'hidden'} lg:flex w-full lg:w-64 xl:w-80 border-r bg-muted/30 flex-col shrink-0`}>
+        <div className={`${mobileView === 'list' ? 'flex' : 'hidden'} lg:flex w-full lg:w-64 xl:w-80 border-r bg-muted/30 flex-col shrink-0 h-full`}>
           <div className="p-4 border-b">
             <h2 className="font-semibold text-lg" data-testid="text-my-menus-title">My Menus</h2>
             <p className="text-sm text-muted-foreground">{generations.length} menu{generations.length !== 1 ? 's' : ''}</p>
@@ -517,7 +517,7 @@ export default function Dashboard() {
         </div>
 
         {/* Right side - Menu editor (full width on mobile) */}
-        <div className={`${mobileView === 'editor' ? 'flex' : 'hidden'} lg:flex flex-1 flex-col overflow-hidden`}>
+        <div className={`${mobileView === 'editor' ? 'flex' : 'hidden'} lg:flex flex-1 flex-col overflow-hidden h-full`}>
           {/* Editor toolbar */}
           <div className="border-b bg-background shrink-0">
             <div className="px-4 py-3">
@@ -727,7 +727,7 @@ export default function Dashboard() {
           </div>
 
           {/* Menu preview/editor */}
-          <div className="flex-1 overflow-auto p-2 sm:p-4 bg-muted/20">
+          <div className="flex-1 min-h-0 overflow-auto p-2 sm:p-4 bg-muted/20">
             <div className="max-w-4xl mx-auto">
               {generationsLoading ? (
                 <div className="flex items-center justify-center py-12 sm:py-24">
