@@ -27,20 +27,47 @@ export default function Dashboard() {
     const subscriptionParam = params.get('subscription');
     const storedSuccess = localStorage.getItem('subscription_success');
     
-    if ((subscriptionParam === 'success' || storedSuccess === 'true') && !successToastShown.current) {
-      successToastShown.current = true;
-      setShowSuccessBanner(true);
-      toast({
-        title: "Payment Successful!",
-        description: "Thank you for subscribing to Claude Menu Pro!",
-      });
-      refreshSubscription?.();
-      localStorage.removeItem('subscription_success');
-      if (subscriptionParam) {
-        localStorage.setItem('subscription_success', 'true');
-        window.history.replaceState({}, '', '/dashboard');
+    async function syncSubscription() {
+      if ((subscriptionParam === 'success' || storedSuccess === 'true') && !successToastShown.current) {
+        successToastShown.current = true;
+        
+        // Sync subscription status from Stripe
+        try {
+          const session = await supabase?.auth.getSession();
+          if (session?.data?.session?.access_token) {
+            const response = await fetch('/api/stripe/sync-subscription', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${session.data.session.access_token}`,
+              },
+            });
+            
+            if (response.ok) {
+              const data = await response.json();
+              console.log('Subscription synced:', data);
+              if (data.has_active_subscription) {
+                setShowSuccessBanner(true);
+                toast({
+                  title: "Payment Successful!",
+                  description: "Thank you for subscribing to Claude Menu Pro!",
+                });
+              }
+            }
+          }
+        } catch (error) {
+          console.error('Error syncing subscription:', error);
+        }
+        
+        refreshSubscription?.();
+        localStorage.removeItem('subscription_success');
+        if (subscriptionParam) {
+          window.history.replaceState({}, '', '/dashboard');
+        }
       }
     }
+    
+    syncSubscription();
   }, [search, toast, refreshSubscription]);
 
   useEffect(() => {
@@ -93,6 +120,66 @@ export default function Dashboard() {
       });
     } else {
       setLocation("/");
+    }
+  };
+
+  const handleSyncSubscription = async () => {
+    try {
+      const session = await supabase?.auth.getSession();
+      if (!session?.data?.session?.access_token) {
+        toast({
+          title: "Not authenticated",
+          description: "Please sign in to sync your subscription",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      toast({
+        title: "Syncing...",
+        description: "Checking your subscription status with Stripe",
+      });
+
+      const response = await fetch('/api/stripe/sync-subscription', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.data.session.access_token}`,
+        },
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('Subscription synced:', data);
+        
+        if (data.has_active_subscription) {
+          setShowSuccessBanner(true);
+          toast({
+            title: "Subscription Active!",
+            description: "Your subscription is now active. You can download your designs.",
+          });
+        } else {
+          toast({
+            title: "No Active Subscription",
+            description: data.message || "No active subscription found. Please complete your payment.",
+          });
+        }
+        refreshSubscription?.();
+      } else {
+        const error = await response.json();
+        toast({
+          title: "Sync Failed",
+          description: error.message || "Failed to sync subscription",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      console.error('Error syncing subscription:', error);
+      toast({
+        title: "Sync Failed",
+        description: error.message || "An error occurred",
+        variant: "destructive",
+      });
     }
   };
 
@@ -207,8 +294,20 @@ export default function Dashboard() {
                 <span className="text-sm text-muted-foreground">Subscription</span>
                 <Clock className="h-4 w-4 text-muted-foreground" />
               </div>
-              <div className="text-xl font-semibold" data-testid="text-subscription-status">
-                {!subscriptionRequired ? "Free" : hasActiveSubscription ? "Active" : "Free"}
+              <div className="flex items-center gap-2">
+                <div className="text-xl font-semibold" data-testid="text-subscription-status">
+                  {!subscriptionRequired ? "Free" : hasActiveSubscription ? "Active" : "Free"}
+                </div>
+                {subscriptionRequired && !hasActiveSubscription && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={handleSyncSubscription}
+                    data-testid="button-sync-subscription"
+                  >
+                    Sync
+                  </Button>
+                )}
               </div>
             </Card>
             <Card className="p-6">

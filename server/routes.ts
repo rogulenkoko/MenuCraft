@@ -225,6 +225,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Sync subscription status from Stripe - called after checkout redirect
+  app.post('/api/stripe/sync-subscription', verifySupabaseToken, async (req: any, res) => {
+    try {
+      const userId = req.supabaseUser.id;
+      const userEmail = req.supabaseUser.email;
+      
+      console.log(`Syncing subscription for user ${userId} (${userEmail})`);
+
+      // Look up customer by email in Stripe
+      const customers = await stripe.customers.list({
+        email: userEmail,
+        limit: 1,
+      });
+
+      if (customers.data.length === 0) {
+        console.log(`No Stripe customer found for ${userEmail}`);
+        return res.json({ 
+          synced: false, 
+          subscription_status: null,
+          message: 'No Stripe customer found' 
+        });
+      }
+
+      const customer = customers.data[0];
+      console.log(`Found Stripe customer: ${customer.id}`);
+
+      // Get active subscriptions for this customer
+      const subscriptions = await stripe.subscriptions.list({
+        customer: customer.id,
+        status: 'active',
+        limit: 1,
+      });
+
+      let subscriptionStatus = 'free';
+      let subscriptionId = null;
+
+      if (subscriptions.data.length > 0) {
+        const subscription = subscriptions.data[0];
+        subscriptionStatus = subscription.status; // 'active', 'trialing', etc.
+        subscriptionId = subscription.id;
+        console.log(`Found active subscription: ${subscriptionId} (${subscriptionStatus})`);
+      } else {
+        // Check for any subscription (including incomplete ones that just completed)
+        const allSubscriptions = await stripe.subscriptions.list({
+          customer: customer.id,
+          limit: 5,
+        });
+        
+        // Find the most recent subscription that's not canceled
+        for (const sub of allSubscriptions.data) {
+          if (sub.status === 'active' || sub.status === 'trialing') {
+            subscriptionStatus = sub.status;
+            subscriptionId = sub.id;
+            console.log(`Found subscription: ${subscriptionId} (${subscriptionStatus})`);
+            break;
+          }
+        }
+      }
+
+      // Ensure profile exists first
+      let profile = await supabaseStorage.getProfile(userId);
+      if (!profile) {
+        // Create profile if it doesn't exist
+        console.log(`Creating profile for user ${userId}`);
+        const newProfile = await supabaseStorage.createProfile({
+          id: userId,
+          email: userEmail,
+          name: req.supabaseUser.user_metadata?.full_name || req.supabaseUser.user_metadata?.name || null,
+          avatar_url: req.supabaseUser.user_metadata?.avatar_url || null,
+        });
+        if (!newProfile) {
+          return res.status(500).json({ message: 'Failed to create profile' });
+        }
+        profile = newProfile;
+      }
+
+      // Update the profile with Stripe info
+      if (subscriptionId) {
+        const updated = await supabaseStorage.updateProfileStripeInfoById(
+          userId,
+          customer.id,
+          subscriptionId,
+          subscriptionStatus
+        );
+        
+        if (updated) {
+          console.log(`Updated profile with subscription status: ${subscriptionStatus}`);
+        } else {
+          console.error(`Failed to update profile stripe info`);
+        }
+      }
+
+      res.json({ 
+        synced: true, 
+        subscription_status: subscriptionStatus,
+        has_active_subscription: subscriptionStatus === 'active' || subscriptionStatus === 'trialing'
+      });
+    } catch (error: any) {
+      console.error('Stripe sync error:', error);
+      res.status(500).json({ message: error.message || 'Failed to sync subscription' });
+    }
+  });
+
   // Create subscription route - uses Supabase auth
   app.post('/api/create-subscription', verifySupabaseToken, async (req: any, res) => {
     try {
