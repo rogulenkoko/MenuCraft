@@ -41,7 +41,7 @@ function sanitizeHtml(html: string): string {
 export default function Dashboard() {
   const { toast } = useToast();
   const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
-  const { hasActiveSubscription, subscriptionRequired, refreshSubscription } = useSubscription();
+  const { hasActiveSubscription, subscriptionRequired, refreshSubscription, syncSubscription, isSyncing } = useSubscription();
   const [, setLocation] = useLocation();
   const params = useParams<{ id?: string }>();
   const search = useSearch();
@@ -495,10 +495,41 @@ export default function Dashboard() {
                   Subscribe to download your designs
                 </p>
                 <Link href="/subscribe">
-                  <Button size="sm" className="w-full" data-testid="button-upgrade">
+                  <Button size="sm" className="w-full mb-2" data-testid="button-upgrade">
                     Upgrade to Pro
                   </Button>
                 </Link>
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  className="w-full text-xs"
+                  onClick={async () => {
+                    const synced = await syncSubscription();
+                    if (synced) {
+                      toast({
+                        title: "Subscription synced!",
+                        description: "Your subscription status has been updated.",
+                      });
+                    } else {
+                      toast({
+                        title: "No active subscription found",
+                        description: "Please complete your purchase or try again.",
+                        variant: "destructive",
+                      });
+                    }
+                  }}
+                  disabled={isSyncing}
+                  data-testid="button-sync-subscription"
+                >
+                  {isSyncing ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                      Checking...
+                    </>
+                  ) : (
+                    "Already paid? Click to sync"
+                  )}
+                </Button>
               </Card>
             </div>
           )}
