@@ -5,10 +5,16 @@ const SUPABASE_JWT_SECRET = process.env.SUPABASE_JWT_SECRET;
 
 interface SupabaseUser {
   sub: string;
+  id: string; // Alias for sub (user ID)
   email?: string;
   aud: string;
   role: string;
   exp: number;
+  user_metadata?: {
+    avatar_url?: string;
+    full_name?: string;
+    name?: string;
+  };
 }
 
 declare global {
@@ -44,6 +50,8 @@ export const verifySupabaseToken: RequestHandler = async (
       return res.status(401).json({ message: "Token expired" });
     }
 
+    // Set id as alias for sub (Supabase user ID)
+    decoded.id = decoded.sub;
     req.supabaseUser = decoded;
     next();
   } catch (error: any) {
