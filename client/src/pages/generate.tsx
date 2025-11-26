@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
+import { useCredits } from "@/hooks/useCredits";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -9,7 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type, ChevronLeft, SkipForward, Check } from "lucide-react";
+import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type, ChevronLeft, SkipForward, Check, Coins } from "lucide-react";
 import { SiGoogle } from "react-icons/si";
 import { Link, useLocation } from "wouter";
 import { useDropzone } from "react-dropzone";
@@ -77,6 +78,7 @@ interface FormState {
 export default function Generate() {
   const { toast } = useToast();
   const { user, profile, session, isAuthenticated, isLoading, signOut, signInWithGoogle } = useSupabaseAuth();
+  const { hasActivated, menuCredits, paymentRequired } = useCredits();
   const [, setLocation] = useLocation();
   const hasTriggeredAutoGenerate = useRef(false);
 
@@ -517,10 +519,8 @@ export default function Generate() {
       <div className="flex h-screen items-center justify-center bg-background">
         <div className="text-center max-w-md px-6">
           <div className="flex items-center justify-center gap-2 mb-8">
-            <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary">
-              <Sparkles className="h-6 w-6 text-primary-foreground" />
-            </div>
-            <span className="text-2xl font-semibold tracking-tight">Claude Menu</span>
+            <img src="/logo.png" alt="Menu Craft" className="h-10 w-10 object-contain" />
+            <span className="text-2xl font-semibold tracking-tight">Menu Craft</span>
           </div>
           
           <div className="relative mb-8">
@@ -922,10 +922,8 @@ export default function Generate() {
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-                <Sparkles className="h-5 w-5 text-primary-foreground" />
-              </div>
-              <span className="text-xl font-semibold tracking-tight">Claude Menu</span>
+              <img src="/logo.png" alt="Menu Craft" className="h-8 w-8 object-contain" />
+              <span className="text-xl font-semibold tracking-tight">Menu Craft</span>
             </div>
             <div className="flex items-center gap-4">
               {isAuthenticated ? (
@@ -936,6 +934,28 @@ export default function Generate() {
                     </Button>
                   </Link>
                   <ThemeToggle />
+                  
+                  {/* Credits display */}
+                  {paymentRequired && (
+                    <div className="flex items-center">
+                      {hasActivated ? (
+                        <Link href="/subscribe">
+                          <Button variant="ghost" size="sm" className="gap-1.5" data-testid="button-credits">
+                            <Coins className="h-4 w-4 text-primary" />
+                            <span className="font-medium">{menuCredits}</span>
+                            <span className="text-muted-foreground hidden sm:inline">credits</span>
+                          </Button>
+                        </Link>
+                      ) : (
+                        <Link href="/subscribe">
+                          <Button size="sm" data-testid="button-activate-header">
+                            Activate
+                          </Button>
+                        </Link>
+                      )}
+                    </div>
+                  )}
+                  
                   <div className="flex items-center gap-2">
                     {userAvatar && (
                       <img

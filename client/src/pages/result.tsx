@@ -260,10 +260,8 @@ export default function Result() {
           <div className="flex items-center justify-between flex-wrap gap-2">
             <Link href="/dashboard">
               <div className="flex items-center gap-2 cursor-pointer">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-                  <Sparkles className="h-5 w-5 text-primary-foreground" />
-                </div>
-                <span className="text-xl font-semibold tracking-tight">Claude Menu</span>
+                <img src="/logo.png" alt="Menu Craft" className="h-8 w-8 object-contain" />
+                <span className="text-xl font-semibold tracking-tight">Menu Craft</span>
               </div>
             </Link>
             <div className="flex items-center gap-4 flex-wrap">

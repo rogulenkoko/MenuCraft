@@ -108,10 +108,8 @@ export default function AuthCallback() {
     <div className="flex h-screen items-center justify-center bg-background">
       <div className="text-center max-w-md px-6">
         <div className="flex items-center justify-center gap-2 mb-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary">
-            <Sparkles className="h-6 w-6 text-primary-foreground" />
-          </div>
-          <span className="text-2xl font-semibold tracking-tight">Claude Menu</span>
+          <img src="/logo.png" alt="Menu Craft" className="h-10 w-10 object-contain" />
+          <span className="text-2xl font-semibold tracking-tight">Menu Craft</span>
         </div>
         
         {hasError ? (

@@ -380,10 +380,8 @@ export default function Dashboard() {
           <div className="flex items-center justify-between gap-4">
             <Link href="/">
               <div className="flex items-center gap-2 cursor-pointer">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-                  <Sparkles className="h-5 w-5 text-primary-foreground" />
-                </div>
-                <span className="text-xl font-semibold tracking-tight hidden sm:inline">Claude Menu</span>
+                <img src="/logo.png" alt="Menu Craft" className="h-8 w-8 object-contain" />
+                <span className="text-xl font-semibold tracking-tight hidden sm:inline">Menu Craft</span>
               </div>
             </Link>
             
@@ -395,6 +393,28 @@ export default function Dashboard() {
                 </Button>
               </Link>
               <ThemeToggle />
+              
+              {/* Credits display */}
+              {paymentRequired && (
+                <div className="flex items-center gap-2">
+                  {hasActivated ? (
+                    <Link href="/subscribe">
+                      <Button variant="ghost" size="sm" className="gap-1.5" data-testid="button-credits">
+                        <Coins className="h-4 w-4 text-primary" />
+                        <span className="font-medium">{menuCredits}</span>
+                        <span className="text-muted-foreground hidden sm:inline">credits</span>
+                      </Button>
+                    </Link>
+                  ) : (
+                    <Link href="/subscribe">
+                      <Button size="sm" data-testid="button-activate-header">
+                        Activate
+                      </Button>
+                    </Link>
+                  )}
+                </div>
+              )}
+              
               <div className="flex items-center gap-2">
                 {userAvatar && (
                   <img
@@ -477,36 +497,6 @@ export default function Dashboard() {
             </div>
           </ScrollArea>
 
-          {/* Credits status and upgrade prompt */}
-          <div className="p-4 border-t">
-            {hasActivated ? (
-              <Card className="p-3 bg-primary/5 border-primary/20">
-                <div className="flex items-center gap-2 mb-2">
-                  <Coins className="h-4 w-4 text-primary" />
-                  <span className="text-sm font-medium">{menuCredits} credits</span>
-                </div>
-                {menuCredits <= 2 && (
-                  <Link href="/subscribe">
-                    <Button size="sm" variant="outline" className="w-full" data-testid="button-buy-credits">
-                      Buy More Credits
-                    </Button>
-                  </Link>
-                )}
-              </Card>
-            ) : paymentRequired ? (
-              <Card className="p-3 bg-primary/5 border-primary/20">
-                <p className="text-xs text-muted-foreground mb-2">
-                  Activate to download your designs
-                </p>
-                <Link href="/subscribe">
-                  <Button size="sm" className="w-full" data-testid="button-activate">
-                    <Sparkles className="h-4 w-4 mr-2" />
-                    Activate Now - $10
-                  </Button>
-                </Link>
-              </Card>
-            ) : null}
-          </div>
         </div>
 
         {/* Right side - Menu editor */}

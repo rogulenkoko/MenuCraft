@@ -1,7 +1,7 @@
-# Claude Menu - AI-Powered Restaurant Menu Designer
+# Menu Craft - AI-Powered Restaurant Menu Designer
 
 ## Overview
-Claude Menu is a SaaS application that transforms restaurant menus into stunning, professional designs using AI. Users follow a multi-step wizard to configure their menu design, upload PDF/DOCX files or paste text, and receive AI-generated HTML menus.
+Menu Craft is a SaaS application that transforms restaurant menus into stunning, professional designs using AI. Users follow a multi-step wizard to configure their menu design, upload PDF/DOCX files or paste text, and receive AI-generated HTML menus.
 
 ## Current State
 **Status**: Production-ready with Supabase architecture and credit-based payment system

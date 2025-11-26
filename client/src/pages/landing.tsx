@@ -46,11 +46,9 @@ export default function Landing() {
         <div className="mx-auto max-w-7xl px-6 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-                <Sparkles className="h-5 w-5 text-primary-foreground" />
-              </div>
+              <img src="/logo.png" alt="Menu Craft" className="h-8 w-8 object-contain" />
               <span className="text-xl font-semibold tracking-tight" data-testid="text-logo">
-                Claude Menu
+                Menu Craft
               </span>
             </div>
             <div className="flex items-center gap-4">
@@ -246,10 +244,8 @@ export default function Landing() {
           <div className="grid gap-8 md:grid-cols-4">
             <div>
               <div className="flex items-center gap-2 mb-4">
-                <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary">
-                  <Sparkles className="h-5 w-5 text-primary-foreground" />
-                </div>
-                <span className="text-lg font-semibold">Claude Menu</span>
+                <img src="/logo.png" alt="Menu Craft" className="h-8 w-8 object-contain" />
+                <span className="text-lg font-semibold">Menu Craft</span>
               </div>
               <p className="text-sm text-muted-foreground">
                 AI-powered menu design for modern restaurants
@@ -281,7 +277,7 @@ export default function Landing() {
             </div>
           </div>
           <div className="border-t mt-8 pt-8 text-center text-sm text-muted-foreground">
-            © 2024 Claude Menu. All rights reserved.
+            © 2024 Menu Craft. All rights reserved.
           </div>
         </div>
       </footer>
