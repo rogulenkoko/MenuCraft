@@ -592,25 +592,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This route generates the 3 HTML variations using Claude AI
   app.post('/api/generate', verifySupabaseToken, async (req: any, res) => {
     try {
-      const { generationId, menuText, colors, size, stylePrompt } = req.body;
+      const { 
+        generationId, 
+        menuText, 
+        colors, 
+        size, 
+        stylePrompt,
+        restaurantName,
+        slogan,
+        theme,
+        fontStyle,
+        layout
+      } = req.body;
 
-      if (!menuText || !colors || !size || !stylePrompt) {
+      if (!menuText || !colors || !size) {
         return res.status(400).json({ message: "Missing required fields" });
       }
 
       console.log(`Generating menu designs for user: ${req.supabaseUser?.email || req.supabaseUser?.id}`);
 
-      // Generate AI designs synchronously (takes ~30 seconds)
-      const htmlVariations = await generateMenuDesigns(menuText, colors, size, stylePrompt);
+      // Generate AI designs synchronously
+      const htmlVariations = await generateMenuDesigns({
+        menuText,
+        colors,
+        size,
+        stylePrompt,
+        restaurantName,
+        slogan,
+        theme,
+        fontStyle,
+        layout
+      });
 
       res.json({ htmlVariations, generationId });
     } catch (error: any) {
       console.error("Error generating designs:", error);
       
-      // Provide user-friendly error message instead of raw API errors
       let userMessage = "We encountered an issue generating your menu designs. Please try again later.";
       
-      // Check if it's an Anthropic API error about credits
       if (error.message && (error.message.includes("credit balance") || error.message.includes("too low"))) {
         userMessage = "The AI service is temporarily unavailable due to API credit limits. Please contact the administrator.";
       }
@@ -726,38 +745,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
   return httpServer;
 }
 
+// Theme descriptions for AI prompt
+const THEME_DESCRIPTIONS: Record<string, string> = {
+  "minimalism": "Clean, simple, elegant design with lots of white space, minimal decorations, and focus on typography",
+  "scandinavian": "Light, airy, natural feel with soft colors, organic shapes, and cozy warmth",
+  "loft": "Raw, urban, industrial style with exposed textures, bold typography, and modern edge",
+  "neon": "Bold, vibrant 80s retrowave style with neon accents, dark backgrounds, and synthwave aesthetics",
+  "japanese": "Peaceful, balanced, refined zen aesthetic with Japanese minimalism and harmonious layout",
+  "greek": "Mediterranean warmth with terracotta tones, rustic textures, and tavern-style charm",
+  "fine-dining": "Luxurious, sophisticated, classic elegance with gold accents and refined typography",
+  "eco": "Green, sustainable, fresh organic feel with natural elements and earthy warmth",
+};
+
+// Font style descriptions for AI prompt
+const FONT_DESCRIPTIONS: Record<string, string> = {
+  "elegant": "Refined serif fonts with delicate strokes, thin weights, and sophisticated letterforms",
+  "bold": "Impactful sans-serif fonts with heavy weights and strong visual presence",
+  "handwritten": "Personal, artisanal script fonts that feel hand-lettered and warm",
+  "modern": "Clean, contemporary geometric sans-serif with perfect circles and clean lines",
+  "retro": "Vintage-inspired display fonts with nostalgic signage style and decorative elements",
+};
+
+// Layout descriptions for AI prompt
+const LAYOUT_DESCRIPTIONS: Record<string, string> = {
+  "single": "Single column layout - clean minimalist design with items stacked vertically, easy to read top to bottom",
+  "two-column": "Two column layout - compact and scannable with dishes organized side by side",
+  "card-grid": "Card grid layout - items displayed in card boxes, perfect for menus with images or featured items",
+};
+
+interface GenerateMenuParams {
+  menuText: string;
+  colors: string[];
+  size: string;
+  stylePrompt?: string;
+  restaurantName?: string;
+  slogan?: string;
+  theme?: string;
+  fontStyle?: string;
+  layout?: string;
+}
+
 // Function to generate a single menu design with Claude
-async function generateMenuDesigns(
-  menuText: string,
-  colors: string[],
-  size: string,
-  stylePrompt: string
-): Promise<string[]> {
+async function generateMenuDesigns(params: GenerateMenuParams): Promise<string[]> {
+  const { menuText, colors, size, stylePrompt, restaurantName, slogan, theme, fontStyle, layout } = params;
+  
   try {
+    // Build theme description
+    let themeDesc = "";
+    if (theme) {
+      themeDesc = THEME_DESCRIPTIONS[theme] || theme;
+    }
+    
+    // Build font description
+    let fontDesc = "";
+    if (fontStyle) {
+      fontDesc = FONT_DESCRIPTIONS[fontStyle] || fontStyle;
+    }
+    
+    // Build layout description
+    let layoutDesc = "";
+    if (layout) {
+      layoutDesc = LAYOUT_DESCRIPTIONS[layout] || layout;
+    }
+
     const systemPrompt = `You are an expert HTML/CSS designer specializing in restaurant menus. Create a complete, standalone HTML file with embedded CSS that displays a beautiful, professional menu.
 
 Requirements:
 - Complete HTML document with <!DOCTYPE html>, proper structure
 - All CSS must be embedded in <style> tags
-- Use the provided color palette: ${colors.join(', ')}
-- Target size: ${size}
+- Use this color palette: ${colors.join(', ')}
+- Target page size: ${size.toUpperCase()}
 - Make it print-ready with @media print styles
-- Use elegant typography (prefer web-safe fonts or Google Fonts via @import)
+- Use elegant typography (Google Fonts via @import recommended)
 - Use proper spacing and visual hierarchy
-- Organize menu items clearly with sections
+- Organize menu items clearly with sections (Appetizers, Main Courses, Desserts, Drinks, etc.)
 - Make text elements easy to identify for editing (use semantic tags like h1, h2, h3, p, span)
 - NO JavaScript
 - Professional, restaurant-quality design
 - Ensure the design looks beautiful when printed as PDF
 
+${restaurantName ? `Restaurant Name: "${restaurantName}" - Display prominently in the header` : ""}
+${slogan ? `Slogan/Tagline: "${slogan}" - Display under the restaurant name` : ""}
+${themeDesc ? `Visual Theme: ${themeDesc}` : ""}
+${fontDesc ? `Typography Style: ${fontDesc}` : ""}
+${layoutDesc ? `Page Layout: ${layoutDesc}` : ""}
+${stylePrompt ? `Additional Style Notes: ${stylePrompt}` : ""}
+
 IMPORTANT: Output ONLY the raw HTML code. Do NOT wrap it in markdown code blocks or add any explanations. Start directly with <!DOCTYPE html> and end with </html>.`;
 
-    const userPrompt = `Create a modern, elegant HTML menu design. ${stylePrompt}
+    const userPrompt = `Create a stunning HTML restaurant menu design based on the specifications above.
 
 Menu Content:
 ${menuText}
 
-Create a complete HTML file that can be opened directly in a browser and printed as PDF. Make it absolutely beautiful and professional. The design should be suitable for a real restaurant menu.`;
+Create a complete HTML file that:
+1. Opens directly in a browser
+2. Prints beautifully as PDF
+3. Follows the visual theme and style specifications exactly
+4. Has a professional header with the restaurant name${slogan ? ' and slogan' : ''}
+5. Organizes menu items into clear sections
+6. Uses the specified color palette throughout
+7. Applies the typography style consistently
+
+Make it absolutely beautiful and suitable for a real upscale restaurant.`;
 
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
@@ -771,10 +861,9 @@ Create a complete HTML file that can be opened directly in a browser and printed
 
     const htmlContent = message.content[0].type === 'text' ? message.content[0].text : '';
     
-    // Extract HTML if it's wrapped in code blocks (handle various formats)
+    // Extract HTML if it's wrapped in code blocks
     let cleanHtml = htmlContent.trim();
     
-    // Try to extract from markdown code blocks
     const htmlMatch = cleanHtml.match(/```(?:html)?\s*\n?([\s\S]*?)```/);
     if (htmlMatch) {
       cleanHtml = htmlMatch[1].trim();
@@ -782,7 +871,6 @@ Create a complete HTML file that can be opened directly in a browser and printed
     
     // Ensure it starts with DOCTYPE or html tag
     if (!cleanHtml.toLowerCase().startsWith('<!doctype') && !cleanHtml.toLowerCase().startsWith('<html')) {
-      // Try to find the HTML document start
       const doctypeIndex = cleanHtml.toLowerCase().indexOf('<!doctype');
       const htmlIndex = cleanHtml.toLowerCase().indexOf('<html');
       const startIndex = Math.min(
@@ -794,7 +882,7 @@ Create a complete HTML file that can be opened directly in a browser and printed
       }
     }
 
-    // Return as array with single element for backwards compatibility
+    // Return as array for backwards compatibility
     return [cleanHtml];
   } catch (error) {
     console.error("Error generating menu design:", error);
