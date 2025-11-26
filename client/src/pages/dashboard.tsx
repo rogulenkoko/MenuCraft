@@ -292,6 +292,12 @@ export default function Dashboard() {
   };
 
   const handleDownloadPdf = async () => {
+    // Redirect to subscribe if payment required and not activated
+    if (paymentRequired && !canDownload) {
+      setLocation('/subscribe');
+      return;
+    }
+    
     setIsDownloading(true);
     
     try {
@@ -326,6 +332,12 @@ export default function Dashboard() {
   };
 
   const handleDownloadHtml = () => {
+    // Redirect to subscribe if payment required and not activated
+    if (paymentRequired && !canDownload) {
+      setLocation('/subscribe');
+      return;
+    }
+    
     try {
       const currentHtml = getCurrentHtmlFromIframe();
       const selected = generations.find(g => g.id === selectedId);
@@ -611,116 +623,52 @@ export default function Dashboard() {
                   </Button>
                   
                   {/* Download HTML button */}
-                  {paymentRequired && !canDownload ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled
-                            className="hidden sm:flex"
-                            data-testid="button-download-html"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            HTML
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        <p>Activate to download</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleDownloadHtml}
-                      className="hidden sm:flex"
-                      data-testid="button-download-html"
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      HTML
-                    </Button>
-                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDownloadHtml}
+                    className="hidden sm:flex"
+                    data-testid="button-download-html"
+                  >
+                    <Download className="h-4 w-4 mr-2" />
+                    HTML
+                  </Button>
                   
                   {/* Download PDF button */}
-                  {paymentRequired && !canDownload ? (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span>
-                            <Button
-                              size="icon"
-                              disabled
-                              className="sm:hidden"
-                              data-testid="button-download-pdf-mobile"
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Activate to download</p>
-                        </TooltipContent>
-                      </Tooltip>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span>
-                            <Button
-                              size="sm"
-                              disabled
-                              className="hidden sm:flex"
-                              data-testid="button-download-pdf"
-                            >
-                              <Download className="h-4 w-4 mr-2" />
-                              PDF
-                            </Button>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Activate to download</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </>
-                  ) : (
-                    <>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            size="icon"
-                            onClick={handleDownloadPdf}
-                            disabled={isDownloading}
-                            className="sm:hidden"
-                            data-testid="button-download-pdf-mobile"
-                          >
-                            {isDownloading ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Download className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Download as PDF</p>
-                        </TooltipContent>
-                      </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
                       <Button
-                        size="sm"
+                        size="icon"
                         onClick={handleDownloadPdf}
                         disabled={isDownloading}
-                        className="hidden sm:flex"
-                        data-testid="button-download-pdf"
+                        className="sm:hidden"
+                        data-testid="button-download-pdf-mobile"
                       >
                         {isDownloading ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <Download className="h-4 w-4 mr-2" />
+                          <Download className="h-4 w-4" />
                         )}
-                        PDF
                       </Button>
-                    </>
-                  )}
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      <p>Download as PDF</p>
+                    </TooltipContent>
+                  </Tooltip>
+                  <Button
+                    size="sm"
+                    onClick={handleDownloadPdf}
+                    disabled={isDownloading}
+                    className="hidden sm:flex"
+                    data-testid="button-download-pdf"
+                  >
+                    {isDownloading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4 mr-2" />
+                    )}
+                    PDF
+                  </Button>
                 </div>
               </div>
             </div>

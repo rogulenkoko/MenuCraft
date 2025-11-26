@@ -7,7 +7,8 @@ Menu Craft is a SaaS application that transforms restaurant menus into stunning,
 **Status**: Production-ready with Supabase architecture and credit-based payment system
 
 ## Payment Model
-- **$10 one-time activation fee** - Unlocks unlimited downloads + 5 menu generation credits
+- **1 FREE menu generation** - Every user gets their first menu generation free (no activation required)
+- **$10 one-time activation fee** - Required for downloading files; grants unlimited downloads + 5 generation credits
 - **$1 per additional credit** - Each credit generates 3 unique menu design variations
 - **Stripe Checkout** - One-time payments via Stripe (not subscriptions)
 
@@ -15,8 +16,10 @@ Menu Craft is a SaaS application that transforms restaurant menus into stunning,
 1. **Landing page IS the generator** - Users start designing immediately without signing in
 2. **Multi-step wizard** - 9 steps with skip functionality for most steps
 3. **Login on generate** - Users sign in only when clicking "Generate Menu"
-4. **Activation required** - Users must pay $10 activation to generate and download menus
-5. **Credits system** - Each generation uses 1 credit; buy more as needed
+4. **Free first generation** - Users can generate 1 menu for free without paying
+5. **Activation for downloads** - Users must pay $10 activation to download any menu files
+6. **Download buttons active** - Download buttons are always enabled; clicking redirects non-activated users to payment page
+7. **Credits system** - After free generation, each subsequent generation uses 1 credit
 
 ## Architecture
 
