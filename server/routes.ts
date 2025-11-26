@@ -15,13 +15,20 @@ const pdfParse = async (dataBuffer: Buffer): Promise<Result> => {
   return parse(dataBuffer);
 };
 
-// Initialize Stripe
-if (!process.env.STRIPE_SECRET_KEY) {
-  throw new Error('Missing required Stripe secret: STRIPE_SECRET_KEY');
+// Check if payment is required (used before Stripe initialization)
+const isPaymentEnabled = process.env.PAYMENT_REQUIRED !== 'false';
+
+// Initialize Stripe only if payment is enabled
+let stripe: Stripe | null = null;
+if (isPaymentEnabled) {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    console.warn('STRIPE_SECRET_KEY not configured - payment features will be disabled');
+  } else {
+    stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+      apiVersion: "2023-10-16",
+    });
+  }
 }
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-  apiVersion: "2023-10-16",
-});
 
 // Pricing constants
 const ACTIVATION_PRICE_CENTS = 1000; // $10 one-time activation
@@ -32,6 +39,7 @@ let activationProductId: string | null = null;
 let creditProductId: string | null = null;
 
 async function getOrCreateActivationProduct(): Promise<string> {
+  if (!stripe) throw new Error('Stripe not configured');
   if (activationProductId) return activationProductId;
   
   // Try to find existing product
@@ -56,6 +64,7 @@ async function getOrCreateActivationProduct(): Promise<string> {
 }
 
 async function getOrCreateCreditProduct(): Promise<string> {
+  if (!stripe) throw new Error('Stripe not configured');
   if (creditProductId) return creditProductId;
   
   // Try to find existing product
@@ -93,29 +102,56 @@ const upload = multer({
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
 });
 
-// Check if subscription feature is required
-function isSubscriptionRequired(): boolean {
-  return process.env.SUBSCRIPTION_REQUIRED !== 'false';
+// Check if payment system is required (can be disabled for development)
+function isPaymentRequired(): boolean {
+  return process.env.PAYMENT_REQUIRED !== 'false';
 }
 
-// Helper to check if user has active subscription (with development bypass support)
-async function ensureActiveSubscription(userId: string): Promise<{ hasAccess: boolean; profile: any }> {
-  // If subscription is not required, grant access to everyone
-  if (!isSubscriptionRequired()) {
+// Helper to check if user can generate menus (has credits)
+async function checkCanGenerate(userId: string): Promise<{ canGenerate: boolean; profile: any; reason?: string }> {
+  // If payments not required, grant access to everyone
+  if (!isPaymentRequired()) {
     const profile = await supabaseStorage.getProfile(userId);
-    return { hasAccess: true, profile };
+    return { canGenerate: true, profile };
   }
   
-  let profile = await supabaseStorage.getProfile(userId);
+  const profile = await supabaseStorage.getProfile(userId);
   
   if (!profile) {
-    return { hasAccess: false, profile: null };
+    return { canGenerate: false, profile: null, reason: 'Profile not found' };
   }
   
-  return {
-    hasAccess: profile.subscription_status === 'active',
-    profile
-  };
+  // Check if user has activated and has credits
+  if (!profile.has_activated) {
+    return { canGenerate: false, profile, reason: 'Account not activated. Please purchase an activation to start generating menus.' };
+  }
+  
+  if ((profile.menu_credits || 0) <= 0) {
+    return { canGenerate: false, profile, reason: 'No credits remaining. Please purchase more credits.' };
+  }
+  
+  return { canGenerate: true, profile };
+}
+
+// Helper to check if user can download (has activated account)
+async function checkCanDownload(userId: string): Promise<{ canDownload: boolean; profile: any; reason?: string }> {
+  // If payments not required, grant access to everyone
+  if (!isPaymentRequired()) {
+    const profile = await supabaseStorage.getProfile(userId);
+    return { canDownload: true, profile };
+  }
+  
+  const profile = await supabaseStorage.getProfile(userId);
+  
+  if (!profile) {
+    return { canDownload: false, profile: null, reason: 'Profile not found' };
+  }
+  
+  if (!profile.has_activated) {
+    return { canDownload: false, profile, reason: 'Account not activated. Activation required for downloads.' };
+  }
+  
+  return { canDownload: true, profile };
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -151,64 +187,162 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // App config route
   app.get('/api/config', async (_req, res) => {
     res.json({
-      subscriptionRequired: isSubscriptionRequired(),
+      paymentRequired: isPaymentRequired(),
+      activationPrice: ACTIVATION_PRICE_CENTS / 100,
+      creditPrice: CREDIT_PRICE_CENTS / 100,
     });
   });
 
-  // Subscription status route - uses Supabase auth
-  app.get('/api/subscription/status', verifySupabaseToken, async (req: any, res) => {
+  // Credits status route - uses Supabase auth
+  app.get('/api/credits', verifySupabaseToken, async (req: any, res) => {
     try {
       const userId = req.supabaseUser.id;
-      const { hasAccess } = await ensureActiveSubscription(userId);
+      const creditsStatus = await supabaseStorage.getCreditsStatus(userId);
       
-      const enableDevBypass = process.env.ENABLE_DEV_SUBSCRIPTION_BYPASS === 'true';
-      const isDevMode = process.env.NODE_ENV === 'development';
-      const isDevelopmentBypass = enableDevBypass && isDevMode && !process.env.STRIPE_WEBHOOK_SECRET;
+      if (!creditsStatus) {
+        return res.json({
+          hasActivated: false,
+          menuCredits: 0,
+          totalGenerated: 0,
+          paymentRequired: isPaymentRequired(),
+        });
+      }
       
       res.json({ 
-        hasActiveSubscription: hasAccess, 
-        isDevelopmentBypass,
-        subscriptionRequired: isSubscriptionRequired()
+        ...creditsStatus,
+        paymentRequired: isPaymentRequired(),
       });
     } catch (error) {
-      console.error("Error checking subscription:", error);
-      res.status(500).json({ message: "Failed to check subscription status" });
+      console.error("Error checking credits:", error);
+      res.status(500).json({ message: "Failed to check credits status" });
     }
   });
 
-  // Stripe Checkout - Simple checkout session (no auth required)
-  app.post('/api/stripe/checkout', async (req: any, res) => {
+  // Pay for activation ($10 one-time) - requires auth
+  app.post('/api/pay/activate', verifySupabaseToken, async (req: any, res) => {
     try {
-      const { returnUrl, email } = req.body;
+      // Check if payment system is enabled
+      if (!isPaymentRequired() || !stripe) {
+        return res.status(400).json({ message: 'Payment system is not enabled' });
+      }
+
+      const userId = req.supabaseUser.id;
+      const userEmail = req.supabaseUser.email;
+      const { returnUrl } = req.body;
       const baseUrl = returnUrl || `https://${req.headers.host}`;
 
-      // Get subscription price
-      const priceId = await getSubscriptionPrice();
+      // Check if already activated
+      const profile = await supabaseStorage.getProfile(userId);
+      if (profile?.has_activated) {
+        return res.status(400).json({ message: 'Account already activated' });
+      }
 
-      // Create checkout session - Stripe will collect email if not provided
-      const sessionConfig: Stripe.Checkout.SessionCreateParams = {
-        mode: 'subscription',
+      // Get or create Stripe customer
+      let customerId = profile?.stripe_customer_id;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: userEmail,
+          metadata: { userId },
+        });
+        customerId = customer.id;
+      }
+
+      // Get activation product
+      const productId = await getOrCreateActivationProduct();
+
+      // Create checkout session for one-time activation
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer: customerId,
         payment_method_types: ['card'],
         line_items: [
           {
-            price: priceId,
+            price_data: {
+              currency: 'usd',
+              product: productId,
+              unit_amount: ACTIVATION_PRICE_CENTS,
+            },
             quantity: 1,
           },
         ],
-        success_url: `${baseUrl}/dashboard?subscription=success`,
-        cancel_url: `${baseUrl}/subscribe?subscription=cancelled`,
-      };
+        metadata: {
+          userId,
+          type: 'activation',
+        },
+        success_url: `${baseUrl}/dashboard?payment=success&type=activation`,
+        cancel_url: `${baseUrl}/dashboard?payment=cancelled`,
+      });
 
-      // Pre-fill email if provided
-      if (email) {
-        sessionConfig.customer_email = email;
-      }
-
-      const session = await stripe.checkout.sessions.create(sessionConfig);
       res.json({ url: session.url });
     } catch (error: any) {
-      console.error('Stripe checkout error:', error);
-      res.status(500).json({ message: error.message || 'Failed to create checkout session' });
+      console.error('Activation checkout error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create activation checkout' });
+    }
+  });
+
+  // Pay for additional credits ($1 each) - requires auth
+  app.post('/api/pay/credits', verifySupabaseToken, async (req: any, res) => {
+    try {
+      // Check if payment system is enabled
+      if (!isPaymentRequired() || !stripe) {
+        return res.status(400).json({ message: 'Payment system is not enabled' });
+      }
+
+      const userId = req.supabaseUser.id;
+      const userEmail = req.supabaseUser.email;
+      const { returnUrl, quantity = 5 } = req.body;
+      const baseUrl = returnUrl || `https://${req.headers.host}`;
+
+      // Validate quantity (1-100)
+      const creditQuantity = Math.min(Math.max(parseInt(quantity) || 5, 1), 100);
+
+      // Check if activated (must be activated to buy credits)
+      const profile = await supabaseStorage.getProfile(userId);
+      if (!profile?.has_activated) {
+        return res.status(400).json({ message: 'Please activate your account first before purchasing credits' });
+      }
+
+      // Get or create Stripe customer
+      let customerId = profile?.stripe_customer_id;
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: userEmail,
+          metadata: { userId },
+        });
+        customerId = customer.id;
+      }
+
+      // Get credit product
+      const productId = await getOrCreateCreditProduct();
+
+      // Create checkout session for credits
+      const session = await stripe.checkout.sessions.create({
+        mode: 'payment',
+        customer: customerId,
+        payment_method_types: ['card'],
+        line_items: [
+          {
+            price_data: {
+              currency: 'usd',
+              product: productId,
+              unit_amount: CREDIT_PRICE_CENTS,
+            },
+            quantity: creditQuantity,
+          },
+        ],
+        metadata: {
+          userId,
+          type: 'credits',
+          quantity: creditQuantity.toString(),
+        },
+        success_url: `${baseUrl}/dashboard?payment=success&type=credits&quantity=${creditQuantity}`,
+        cancel_url: `${baseUrl}/dashboard?payment=cancelled`,
+      });
+
+      res.json({ url: session.url });
+    } catch (error: any) {
+      console.error('Credits checkout error:', error);
+      res.status(500).json({ message: error.message || 'Failed to create credits checkout' });
     }
   });
 
@@ -476,24 +610,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(400).send(`Webhook Error: ${err.message}`);
     }
 
-    // Handle the event - update Supabase profiles only
+    // Handle the event - process one-time payments for activation and credits
     switch (event.type) {
       case 'checkout.session.completed': {
         const session = event.data.object as Stripe.Checkout.Session;
-        const customerEmail = session.customer_email || session.customer_details?.email;
         const customerId = session.customer as string;
-        const subscriptionId = session.subscription as string;
+        const metadata = session.metadata || {};
+        const paymentType = metadata.type;
+        const userId = metadata.userId;
         
-        console.log(`Checkout completed for ${customerEmail}, subscription: ${subscriptionId}`);
+        console.log(`Checkout completed: type=${paymentType}, userId=${userId}, customerId=${customerId}`);
         
-        if (customerEmail && subscriptionId) {
-          await supabaseStorage.updateProfileStripeInfo(customerEmail, customerId, subscriptionId, 'active');
+        if (!userId) {
+          console.error('No userId in session metadata');
+          break;
+        }
+
+        // Handle one-time payment types
+        if (paymentType === 'activation') {
+          console.log(`Processing activation for user ${userId}`);
+          const activated = await supabaseStorage.activateUser(userId, customerId);
+          if (activated) {
+            console.log(`Successfully activated user ${userId} with 5 credits`);
+          } else {
+            console.error(`Failed to activate user ${userId}`);
+          }
+        } else if (paymentType === 'credits') {
+          const quantity = parseInt(metadata.quantity || '5');
+          console.log(`Processing ${quantity} credits for user ${userId}`);
+          const added = await supabaseStorage.addCredits(userId, quantity);
+          if (added) {
+            console.log(`Successfully added ${quantity} credits to user ${userId}`);
+          } else {
+            console.error(`Failed to add credits to user ${userId}`);
+          }
+        } else if (session.subscription) {
+          // Legacy subscription handling (for backwards compatibility)
+          const customerEmail = session.customer_email || session.customer_details?.email;
+          const subscriptionId = session.subscription as string;
+          if (customerEmail && subscriptionId) {
+            await supabaseStorage.updateProfileStripeInfo(customerEmail, customerId, subscriptionId, 'active');
+          }
         }
         break;
       }
 
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
+        // Keep for backwards compatibility with existing subscriptions
         const subscription = event.data.object as Stripe.Subscription;
         const customerId = subscription.customer as string;
         
@@ -507,6 +671,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       case 'customer.subscription.deleted': {
+        // Keep for backwards compatibility
         const deletedSubscription = event.data.object as Stripe.Subscription;
         const deletedCustomerId = deletedSubscription.customer as string;
         
@@ -515,24 +680,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         if (deletedEmail) {
           await supabaseStorage.updateProfileStripeInfo(deletedEmail, deletedCustomerId, deletedSubscription.id, 'canceled');
-        }
-        break;
-      }
-
-      case 'invoice.payment_succeeded': {
-        const invoice = event.data.object as Stripe.Invoice;
-        const subscriptionId = invoice.subscription as string;
-        
-        if (subscriptionId) {
-          const sub = await stripe.subscriptions.retrieve(subscriptionId);
-          const invoiceCustomerId = sub.customer as string;
-          
-          const invoiceCustomer = await stripe.customers.retrieve(invoiceCustomerId);
-          const invoiceEmail = (invoiceCustomer as Stripe.Customer).email;
-          
-          if (invoiceEmail) {
-            await supabaseStorage.updateProfileStripeInfo(invoiceEmail, invoiceCustomerId, subscriptionId, 'active');
-          }
         }
         break;
       }
@@ -614,6 +761,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // This route generates the 3 HTML variations using Claude AI
   app.post('/api/generate', verifySupabaseToken, async (req: any, res) => {
     try {
+      const userId = req.supabaseUser.id;
+      
+      // Check if user can generate (has credits)
+      const { canGenerate, reason } = await checkCanGenerate(userId);
+      if (!canGenerate) {
+        return res.status(403).json({ 
+          message: reason || 'Cannot generate menu',
+          needsActivation: reason?.includes('not activated'),
+          needsCredits: reason?.includes('No credits'),
+        });
+      }
+
       const { 
         generationId, 
         menuText, 
@@ -634,6 +793,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       console.log(`Generating menu designs for user: ${req.supabaseUser?.email || req.supabaseUser?.id}`);
+      
+      // Use a credit before generating
+      const creditUsed = await supabaseStorage.useCredit(userId);
+      if (!creditUsed) {
+        return res.status(403).json({ 
+          message: 'Failed to use credit. Please check your credit balance.',
+          needsCredits: true,
+        });
+      }
+      console.log(`Used 1 credit for user ${userId}`);
 
       // Generate AI designs synchronously
       const htmlVariations = await generateMenuDesigns({
@@ -724,17 +893,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Download HTML (requires subscription if SUBSCRIPTION_REQUIRED=true) - uses Supabase auth
+  // Download HTML (requires activation if payment is required) - uses Supabase auth
   app.get('/api/generations/:id/download/:variation', verifySupabaseToken, async (req: any, res) => {
     try {
       const userId = req.supabaseUser.id;
       
-      // Check subscription if required
-      if (isSubscriptionRequired()) {
-        const { hasAccess } = await ensureActiveSubscription(userId);
-        if (!hasAccess) {
-          return res.status(403).json({ message: "Active subscription required to download designs" });
-        }
+      // Check if user can download (has activated account)
+      const { canDownload, reason } = await checkCanDownload(userId);
+      if (!canDownload) {
+        return res.status(403).json({ 
+          message: reason || "Activation required to download designs",
+          needsActivation: true,
+        });
       }
       
       const generation = await supabaseStorage.getMenuGeneration(req.params.id);

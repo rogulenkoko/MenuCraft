@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useSupabaseAuth } from "@/hooks/useSupabaseAuth";
-import { useSubscription } from "@/hooks/useSubscription";
+import { useCredits } from "@/hooks/useCredits";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -17,7 +17,8 @@ import {
   RotateCcw,
   Loader2,
   Calendar,
-  ChevronRight
+  ChevronRight,
+  Coins
 } from "lucide-react";
 import { Link, useLocation, useParams, useSearch } from "wouter";
 import { supabase, MenuGeneration, isSupabaseConfigured } from "@/lib/supabase";
@@ -41,7 +42,7 @@ function sanitizeHtml(html: string): string {
 export default function Dashboard() {
   const { toast } = useToast();
   const { user, profile, isAuthenticated, isLoading, signOut, isSupabaseReady } = useSupabaseAuth();
-  const { hasActiveSubscription, subscriptionRequired, refreshSubscription, syncSubscription, isSyncing } = useSubscription();
+  const { hasActivated, menuCredits, paymentRequired, canDownload, refreshCredits, isLoading: creditsLoading } = useCredits();
   const [, setLocation] = useLocation();
   const params = useParams<{ id?: string }>();
   const search = useSearch();
@@ -58,51 +59,39 @@ export default function Dashboard() {
   const hasInitializedIframe = useRef(false);
   const lastSavedHtmlRef = useRef<string>("");
 
-  // Handle subscription success redirect
+  // Handle payment success redirect
   useEffect(() => {
     const params = new URLSearchParams(search);
-    const subscriptionParam = params.get('subscription');
-    const storedSuccess = localStorage.getItem('subscription_success');
+    const paymentParam = params.get('payment');
+    const paymentType = params.get('type');
+    const quantity = params.get('quantity');
     
-    async function syncSubscription() {
-      if ((subscriptionParam === 'success' || storedSuccess === 'true') && !successToastShown.current) {
-        successToastShown.current = true;
-        
-        try {
-          const session = await supabase?.auth.getSession();
-          if (session?.data?.session?.access_token) {
-            const response = await fetch('/api/stripe/sync-subscription', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${session.data.session.access_token}`,
-              },
-            });
-            
-            if (response.ok) {
-              const data = await response.json();
-              if (data.has_active_subscription) {
-                toast({
-                  title: "Payment Successful!",
-                  description: "Thank you for subscribing to Claude Menu Pro!",
-                });
-              }
-            }
-          }
-        } catch (error) {
-          console.error('Error syncing subscription:', error);
-        }
-        
-        refreshSubscription?.();
-        localStorage.removeItem('subscription_success');
-        if (subscriptionParam) {
-          window.history.replaceState({}, '', '/dashboard');
-        }
+    if (paymentParam === 'success' && !successToastShown.current) {
+      successToastShown.current = true;
+      
+      if (paymentType === 'activation') {
+        toast({
+          title: "Activation Successful!",
+          description: "Your account is now activated with 5 credits. You can start generating menus!",
+        });
+      } else if (paymentType === 'credits') {
+        toast({
+          title: "Credits Added!",
+          description: `${quantity || 5} credits have been added to your account.`,
+        });
       }
+      
+      refreshCredits();
+      window.history.replaceState({}, '', '/dashboard');
+    } else if (paymentParam === 'cancelled') {
+      toast({
+        title: "Payment Cancelled",
+        description: "Your payment was cancelled. No charges were made.",
+        variant: "destructive",
+      });
+      window.history.replaceState({}, '', '/dashboard');
     }
-    
-    syncSubscription();
-  }, [search, toast, refreshSubscription]);
+  }, [search, toast, refreshCredits]);
 
   // Redirect if not authenticated
   useEffect(() => {
@@ -488,51 +477,36 @@ export default function Dashboard() {
             </div>
           </ScrollArea>
 
-          {subscriptionRequired && !hasActiveSubscription && (
-            <div className="p-4 border-t">
+          {/* Credits status and upgrade prompt */}
+          <div className="p-4 border-t">
+            {hasActivated ? (
+              <Card className="p-3 bg-primary/5 border-primary/20">
+                <div className="flex items-center gap-2 mb-2">
+                  <Coins className="h-4 w-4 text-primary" />
+                  <span className="text-sm font-medium">{menuCredits} credits</span>
+                </div>
+                {menuCredits <= 2 && (
+                  <Link href="/subscribe">
+                    <Button size="sm" variant="outline" className="w-full" data-testid="button-buy-credits">
+                      Buy More Credits
+                    </Button>
+                  </Link>
+                )}
+              </Card>
+            ) : paymentRequired ? (
               <Card className="p-3 bg-primary/5 border-primary/20">
                 <p className="text-xs text-muted-foreground mb-2">
-                  Subscribe to download your designs
+                  Activate to download your designs
                 </p>
                 <Link href="/subscribe">
-                  <Button size="sm" className="w-full mb-2" data-testid="button-upgrade">
-                    Upgrade to Pro
+                  <Button size="sm" className="w-full" data-testid="button-activate">
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Activate Now - $10
                   </Button>
                 </Link>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="w-full text-xs"
-                  onClick={async () => {
-                    const synced = await syncSubscription();
-                    if (synced) {
-                      toast({
-                        title: "Subscription synced!",
-                        description: "Your subscription status has been updated.",
-                      });
-                    } else {
-                      toast({
-                        title: "No active subscription found",
-                        description: "Please complete your purchase or try again.",
-                        variant: "destructive",
-                      });
-                    }
-                  }}
-                  disabled={isSyncing}
-                  data-testid="button-sync-subscription"
-                >
-                  {isSyncing ? (
-                    <>
-                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                      Checking...
-                    </>
-                  ) : (
-                    "Already paid? Click to sync"
-                  )}
-                </Button>
               </Card>
-            </div>
-          )}
+            ) : null}
+          </div>
         </div>
 
         {/* Right side - Menu editor */}
@@ -574,7 +548,7 @@ export default function Dashboard() {
                     )}
                     Save
                   </Button>
-                  {subscriptionRequired && !hasActiveSubscription ? (
+                  {paymentRequired && !canDownload ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span>
@@ -590,7 +564,7 @@ export default function Dashboard() {
                         </span>
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Subscribe to download</p>
+                        <p>Activate to download</p>
                       </TooltipContent>
                     </Tooltip>
                   ) : (
@@ -604,7 +578,7 @@ export default function Dashboard() {
                       HTML
                     </Button>
                   )}
-                  {subscriptionRequired && !hasActiveSubscription ? (
+                  {paymentRequired && !canDownload ? (
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span>
@@ -619,7 +593,7 @@ export default function Dashboard() {
                         </span>
                       </TooltipTrigger>
                       <TooltipContent>
-                        <p>Subscribe to download</p>
+                        <p>Activate to download</p>
                       </TooltipContent>
                     </Tooltip>
                   ) : (
