@@ -727,48 +727,52 @@ export default function Dashboard() {
           </div>
 
           {/* Menu preview/editor */}
-          <div className="flex-1 min-h-0 overflow-auto p-2 sm:p-4 bg-muted/20">
-            <div className="max-w-4xl mx-auto">
+          <div className="flex-1 min-h-0 flex flex-col p-2 sm:p-4 bg-muted/20">
+            <div className="max-w-4xl mx-auto w-full flex-1 flex flex-col min-h-0">
               {generationsLoading ? (
-                <div className="flex items-center justify-center py-12 sm:py-24">
+                <div className="flex items-center justify-center flex-1">
                   <div className="text-center">
                     <Loader2 className="h-10 w-10 sm:h-12 sm:w-12 animate-spin text-primary mx-auto mb-4" />
                     <p className="text-muted-foreground">Loading your menus...</p>
                   </div>
                 </div>
               ) : !selectedId ? (
-                <Card className="p-6 sm:p-12 text-center">
-                  <FileText className="h-12 w-12 sm:h-16 sm:w-16 text-muted-foreground mx-auto mb-4" />
-                  <h3 className="text-lg sm:text-xl font-medium mb-2">Select a Menu</h3>
-                  <p className="text-sm sm:text-base text-muted-foreground mb-4">
-                    <span className="hidden lg:inline">Choose a menu from the list to view and edit</span>
-                    <span className="lg:hidden">Use the back button to see your menu list</span>
-                  </p>
-                  <Button
-                    variant="outline"
-                    onClick={handleBackToList}
-                    className="lg:hidden"
-                    data-testid="button-view-menus"
-                  >
-                    <ChevronLeft className="h-4 w-4 mr-2" />
-                    View My Menus
-                  </Button>
-                </Card>
+                <div className="flex items-center justify-center flex-1">
+                  <Card className="p-6 sm:p-12 text-center">
+                    <FileText className="h-12 w-12 sm:h-16 sm:w-16 text-muted-foreground mx-auto mb-4" />
+                    <h3 className="text-lg sm:text-xl font-medium mb-2">Select a Menu</h3>
+                    <p className="text-sm sm:text-base text-muted-foreground mb-4">
+                      <span className="hidden lg:inline">Choose a menu from the list to view and edit</span>
+                      <span className="lg:hidden">Use the back button to see your menu list</span>
+                    </p>
+                    <Button
+                      variant="outline"
+                      onClick={handleBackToList}
+                      className="lg:hidden"
+                      data-testid="button-view-menus"
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-2" />
+                      View My Menus
+                    </Button>
+                  </Card>
+                </div>
               ) : !editedHtml ? (
-                <Card className="p-6 sm:p-12 text-center">
-                  <Loader2 className="h-12 w-12 sm:h-16 sm:w-16 text-primary animate-spin mx-auto mb-4" />
-                  <h3 className="text-lg sm:text-xl font-medium mb-2">Loading Menu</h3>
-                  <p className="text-sm sm:text-base text-muted-foreground">
-                    Please wait while we load your menu design...
-                  </p>
-                </Card>
+                <div className="flex items-center justify-center flex-1">
+                  <Card className="p-6 sm:p-12 text-center">
+                    <Loader2 className="h-12 w-12 sm:h-16 sm:w-16 text-primary animate-spin mx-auto mb-4" />
+                    <h3 className="text-lg sm:text-xl font-medium mb-2">Loading Menu</h3>
+                    <p className="text-sm sm:text-base text-muted-foreground">
+                      Please wait while we load your menu design...
+                    </p>
+                  </Card>
+                </div>
               ) : (
-                <Card className="overflow-hidden shadow-lg">
-                  <div className="bg-white">
+                <Card className="overflow-hidden shadow-lg flex-1 flex flex-col min-h-0">
+                  <div className="bg-white flex-1 flex flex-col min-h-0">
                     <iframe
                       ref={iframeRef}
-                      className="w-full border-0"
-                      style={{ minHeight: '600px', height: 'auto' }}
+                      className="w-full border-0 flex-1"
+                      style={{ minHeight: '400px' }}
                       title="Menu Preview"
                       sandbox="allow-same-origin"
                       data-testid="iframe-menu-preview"
