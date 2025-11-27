@@ -112,10 +112,13 @@ export default function Dashboard() {
   }, [isAuthenticated, isLoading, isSupabaseReady, toast, setLocation]);
 
   // Fetch all generations
+  // IMPORTANT: Wait for creditsLoading to finish - this ensures profile exists before querying menu_generations
   useEffect(() => {
     async function fetchGenerations() {
-      if (!isAuthenticated || !isSupabaseConfigured || !supabase) {
-        setGenerationsLoading(false);
+      if (!isAuthenticated || !isSupabaseConfigured || !supabase || creditsLoading) {
+        if (!creditsLoading && isAuthenticated) {
+          setGenerationsLoading(false);
+        }
         return;
       }
 
@@ -150,10 +153,10 @@ export default function Dashboard() {
       }
     }
 
-    if (isAuthenticated) {
+    if (isAuthenticated && !creditsLoading) {
       fetchGenerations();
     }
-  }, [isAuthenticated, selectedId, toast, setLocation]);
+  }, [isAuthenticated, creditsLoading, selectedId, toast, setLocation]);
 
   // Load selected generation HTML
   useEffect(() => {

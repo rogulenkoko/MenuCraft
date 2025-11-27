@@ -58,6 +58,22 @@ export default function AuthCallback() {
           : 'Success! Redirecting to dashboard...';
 
         if (session) {
+          // IMPORTANT: Ensure profile exists BEFORE redirecting
+          // This prevents 409 conflicts when dashboard queries menu_generations
+          setStatus('Setting up your account...');
+          try {
+            const response = await fetch('/api/credits', {
+              headers: {
+                'Authorization': `Bearer ${session.access_token}`,
+              },
+            });
+            if (!response.ok) {
+              console.warn('Profile setup returned non-OK status:', response.status);
+            }
+          } catch (profileError) {
+            console.warn('Profile setup error (continuing anyway):', profileError);
+          }
+          
           setStatus(redirectMessage);
           // Clear the URL params before redirecting
           window.history.replaceState(null, '', '/auth/callback');
@@ -77,6 +93,21 @@ export default function AuthCallback() {
             }
             
             if (data?.session) {
+              // IMPORTANT: Ensure profile exists BEFORE redirecting
+              setStatus('Setting up your account...');
+              try {
+                const response = await fetch('/api/credits', {
+                  headers: {
+                    'Authorization': `Bearer ${data.session.access_token}`,
+                  },
+                });
+                if (!response.ok) {
+                  console.warn('Profile setup returned non-OK status:', response.status);
+                }
+              } catch (profileError) {
+                console.warn('Profile setup error (continuing anyway):', profileError);
+              }
+              
               setStatus(redirectMessage);
               window.history.replaceState(null, '', '/auth/callback');
               setTimeout(() => setLocation(redirectPath), 500);
