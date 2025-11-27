@@ -142,17 +142,49 @@ function isPaymentRequired(): boolean {
 }
 
 // Helper to check if user can generate menus (has credits or first free generation)
-async function checkCanGenerate(userId: string): Promise<{ canGenerate: boolean; profile: any; reason?: string; isFreeGeneration?: boolean }> {
+// Also creates profile if it doesn't exist (for new users)
+async function checkCanGenerate(
+  userId: string, 
+  userInfo?: { email?: string; name?: string; avatar_url?: string }
+): Promise<{ canGenerate: boolean; profile: any; reason?: string; isFreeGeneration?: boolean }> {
   // If payments not required, grant access to everyone
   if (!isPaymentRequired()) {
-    const profile = await supabaseStorage.getProfile(userId);
+    let profile = await supabaseStorage.getProfile(userId);
+    // Create profile if it doesn't exist (for new users)
+    if (!profile && userInfo?.email) {
+      console.log(`[CheckCanGenerate] Creating profile for new user ${userId}`);
+      profile = await supabaseStorage.createProfile({
+        id: userId,
+        email: userInfo.email,
+        name: userInfo.name || null,
+        avatar_url: userInfo.avatar_url || null,
+      });
+    }
     return { canGenerate: true, profile };
   }
   
-  const profile = await supabaseStorage.getProfile(userId);
+  let profile = await supabaseStorage.getProfile(userId);
   
+  // Create profile if it doesn't exist (for new users)
   if (!profile) {
-    return { canGenerate: false, profile: null, reason: 'Profile not found' };
+    if (!userInfo?.email) {
+      return { canGenerate: false, profile: null, reason: 'Profile not found and no email provided' };
+    }
+    
+    console.log(`[CheckCanGenerate] Creating profile for new user ${userId}`);
+    profile = await supabaseStorage.createProfile({
+      id: userId,
+      email: userInfo.email,
+      name: userInfo.name || null,
+      avatar_url: userInfo.avatar_url || null,
+    });
+    
+    if (!profile) {
+      console.error(`[CheckCanGenerate] Failed to create profile for user ${userId}`);
+      return { canGenerate: false, profile: null, reason: 'Failed to create user profile' };
+    }
+    
+    console.log(`[CheckCanGenerate] Created profile for user ${userId}, allowing free generation`);
   }
   
   // Allow first free generation for new users (even if not activated)
@@ -853,9 +885,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post('/api/generate', verifySupabaseToken, async (req: any, res) => {
     try {
       const userId = req.supabaseUser.id;
+      const userEmail = req.supabaseUser.email;
+      const userName = req.supabaseUser.user_metadata?.full_name || req.supabaseUser.user_metadata?.name;
+      const userAvatar = req.supabaseUser.user_metadata?.avatar_url || req.supabaseUser.user_metadata?.picture;
       
       // Check if user can generate (has credits or free generation)
-      const { canGenerate, reason, isFreeGeneration } = await checkCanGenerate(userId);
+      // Also creates profile if it doesn't exist (for new users)
+      const { canGenerate, reason, isFreeGeneration } = await checkCanGenerate(userId, {
+        email: userEmail,
+        name: userName,
+        avatar_url: userAvatar,
+      });
       if (!canGenerate) {
         return res.status(403).json({ 
           message: reason || 'Cannot generate menu',
