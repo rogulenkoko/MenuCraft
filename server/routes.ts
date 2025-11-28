@@ -916,7 +916,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customThemeDescription,
         fontStyle,
         layout,
-        generalDescription
+        generalDescription,
+        referenceImage,
+        similarityLevel
       } = req.body;
 
       if (!menuText || !colors || !size) {
@@ -953,7 +955,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         customThemeDescription,
         fontStyle,
         layout,
-        generalDescription
+        generalDescription,
+        referenceImage,
+        similarityLevel
       });
 
       res.json({ htmlVariations, generationId });
@@ -1118,7 +1122,18 @@ interface GenerateMenuParams {
   fontStyle?: string;
   layout?: string;
   generalDescription?: string;
+  referenceImage?: string | null;
+  similarityLevel?: number | null;
 }
+
+// Similarity level descriptions for the AI prompt
+const SIMILARITY_DESCRIPTIONS: Record<number, string> = {
+  0: "Use the reference image purely for creative inspiration. Extract the mood, general aesthetic, and feeling, but create an original design with your own layout and structure.",
+  25: "Create a design loosely inspired by the reference. Borrow general style elements and color sensibilities, but use a different layout and structure.",
+  50: "Create a moderately similar design. Match the general style, typography approach, and visual tone of the reference, while adapting the layout to the menu content.",
+  75: "Create a closely matched design. Replicate the layout structure, typography choices, color usage, and visual hierarchy as closely as possible while adapting to the menu content.",
+  100: "Create a near-replica of the reference design. Match the exact layout, typography, spacing, decorative elements, and visual style as closely as possible.",
+};
 
 // Function to generate a single menu design with Claude
 async function generateMenuDesigns(params: GenerateMenuParams): Promise<string[]> {
@@ -1133,7 +1148,9 @@ async function generateMenuDesigns(params: GenerateMenuParams): Promise<string[]
     customThemeDescription,
     fontStyle, 
     layout,
-    generalDescription 
+    generalDescription,
+    referenceImage,
+    similarityLevel
   } = params;
   
   try {
@@ -1154,6 +1171,17 @@ async function generateMenuDesigns(params: GenerateMenuParams): Promise<string[]
     let layoutDesc = "";
     if (layout) {
       layoutDesc = LAYOUT_DESCRIPTIONS[layout] || layout;
+    }
+
+    // Get similarity description based on the level
+    let similarityDesc = "";
+    if (referenceImage && similarityLevel !== null && similarityLevel !== undefined) {
+      // Find the closest similarity level description
+      const levels = Object.keys(SIMILARITY_DESCRIPTIONS).map(Number).sort((a, b) => a - b);
+      const closest = levels.reduce((prev, curr) => 
+        Math.abs(curr - similarityLevel) < Math.abs(prev - similarityLevel) ? curr : prev
+      );
+      similarityDesc = SIMILARITY_DESCRIPTIONS[closest];
     }
 
     const systemPrompt = `You are an expert HTML/CSS designer specializing in restaurant menus. Create a complete, standalone HTML file with embedded CSS that displays a beautiful, professional menu.
@@ -1181,9 +1209,22 @@ ${layoutDesc ? `Page Layout: ${layoutDesc}` : ""}
 ${generalDescription ? `Additional requirements: ${generalDescription}` : ""}
 ${stylePrompt ? `Extra notes: ${stylePrompt}` : ""}
 
+${referenceImage ? `
+REFERENCE IMAGE INSTRUCTIONS:
+A reference menu image has been provided. Analyze this image carefully and use it as a design reference.
+${similarityDesc}
+Study the following aspects from the reference:
+- Layout structure and organization
+- Typography choices and hierarchy
+- Color scheme and usage (but still incorporate the provided color palette)
+- Decorative elements and borders
+- Spacing and whitespace usage
+- Overall aesthetic and mood
+` : ""}
+
 IMPORTANT: Output ONLY the raw HTML code. Do NOT wrap it in markdown code blocks or add any explanations. Start directly with <!DOCTYPE html> and end with </html>.`;
 
-    const userPrompt = `Create a stunning HTML restaurant menu design based on the specifications above.
+    const userPromptText = `Create a stunning HTML restaurant menu design based on the specifications above.
 
 Menu Content:
 ${menuText}
@@ -1196,15 +1237,50 @@ Create a complete HTML file that:
 5. Organizes menu items into clear sections
 6. Uses the specified color palette throughout
 7. Applies the typography style consistently
+${referenceImage ? `8. Takes design inspiration from the provided reference image according to the similarity level specified` : ""}
 
 Make it absolutely beautiful and suitable for a real upscale restaurant.`;
+
+    // Build the message content - either with or without reference image
+    let messageContent: any;
+    
+    if (referenceImage) {
+      // Extract base64 data and media type from data URL
+      const base64Match = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
+      if (base64Match) {
+        const mediaType = base64Match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+        const base64Data = base64Match[2];
+        
+        messageContent = [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: mediaType,
+              data: base64Data,
+            },
+          },
+          {
+            type: "text",
+            text: userPromptText,
+          },
+        ];
+        console.log(`Generating menu with reference image (similarity: ${similarityLevel}%)`);
+      } else {
+        // Invalid base64 format, fall back to text only
+        messageContent = userPromptText;
+        console.log('Invalid reference image format, generating without reference');
+      }
+    } else {
+      messageContent = userPromptText;
+    }
 
     const message = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
       max_tokens: 8192,
       messages: [{
         role: 'user',
-        content: userPrompt
+        content: messageContent
       }],
       system: systemPrompt,
     });

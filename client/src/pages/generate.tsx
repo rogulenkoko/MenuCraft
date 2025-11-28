@@ -10,7 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type, ChevronLeft, SkipForward, Check, Coins } from "lucide-react";
+import { Sparkles, Upload, FileText, LogOut, Loader2, X, Type, ChevronLeft, SkipForward, Check, Coins, Image, Copy, Lightbulb } from "lucide-react";
+import { Slider } from "@/components/ui/slider";
 import { SiGoogle } from "react-icons/si";
 import { Link, useLocation } from "wouter";
 import { useDropzone } from "react-dropzone";
@@ -54,9 +55,17 @@ const LAYOUT_OPTIONS = [
 
 const MENU_SIZES = ["a4", "letter", "a5", "half-letter"] as const;
 
-type WizardStep = "content" | "name" | "slogan" | "theme" | "colors" | "fonts" | "layout" | "size" | "description";
+const SIMILARITY_LABELS = [
+  { value: 0, label: "Just inspired", description: "Use reference for inspiration only" },
+  { value: 25, label: "Loosely similar", description: "Similar style, different layout" },
+  { value: 50, label: "Moderately similar", description: "Similar style and structure" },
+  { value: 75, label: "Closely matched", description: "Very similar design approach" },
+  { value: 100, label: "Near replica", description: "Match as closely as possible" },
+];
 
-const STEPS: WizardStep[] = ["content", "name", "slogan", "theme", "colors", "fonts", "layout", "size", "description"];
+type WizardStep = "content" | "name" | "slogan" | "theme" | "colors" | "fonts" | "layout" | "size" | "reference" | "description";
+
+const STEPS: WizardStep[] = ["content", "name", "slogan", "theme", "colors", "fonts", "layout", "size", "reference", "description"];
 
 interface FormState {
   inputMethod: "file" | "text";
@@ -72,6 +81,9 @@ interface FormState {
   selectedFont: string;
   selectedLayout: string;
   size: string;
+  referenceImageBase64: string | null;
+  referenceImageName: string | null;
+  similarityLevel: number;
   generalDescription: string;
 }
 
@@ -101,6 +113,9 @@ export default function Generate() {
   const [selectedFont, setSelectedFont] = useState<string>("");
   const [selectedLayout, setSelectedLayout] = useState<string>("");
   const [size, setSize] = useState("a4");
+  const [referenceImageBase64, setReferenceImageBase64] = useState<string | null>(null);
+  const [referenceImageName, setReferenceImageName] = useState<string | null>(null);
+  const [similarityLevel, setSimilarityLevel] = useState(50);
   const [generalDescription, setGeneralDescription] = useState("");
   
   const [isGenerating, setIsGenerating] = useState(false);
@@ -123,6 +138,9 @@ export default function Generate() {
         setSelectedFont(state.selectedFont);
         setSelectedLayout(state.selectedLayout);
         setSize(state.size);
+        setReferenceImageBase64(state.referenceImageBase64 || null);
+        setReferenceImageName(state.referenceImageName || null);
+        setSimilarityLevel(state.similarityLevel ?? 50);
         setGeneralDescription(state.generalDescription);
         
         // If we have a pending generation, go to final step
@@ -172,6 +190,9 @@ export default function Generate() {
       selectedFont,
       selectedLayout,
       size,
+      referenceImageBase64,
+      referenceImageName,
+      similarityLevel,
       generalDescription,
     };
     localStorage.setItem(FORM_STATE_KEY, JSON.stringify(state));
@@ -380,6 +401,11 @@ export default function Generate() {
       case "size":
         setSize("a4");
         break;
+      case "reference":
+        setReferenceImageBase64(null);
+        setReferenceImageName(null);
+        setSimilarityLevel(50);
+        break;
       case "description":
         setGeneralDescription("");
         break;
@@ -472,6 +498,8 @@ export default function Generate() {
           fontStyle: selectedFont || null,
           layout: selectedLayout || null,
           generalDescription: generalDescription || null,
+          referenceImage: referenceImageBase64 || null,
+          similarityLevel: referenceImageBase64 ? similarityLevel : null,
         }),
       });
 
@@ -890,6 +918,124 @@ export default function Generate() {
                 </button>
               ))}
             </div>
+          </div>
+        );
+
+      case "reference":
+        return (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-semibold">Reference Menu (Optional)</h2>
+              <p className="text-muted-foreground">Upload an image of a menu you like as inspiration for your design</p>
+            </div>
+            
+            {!referenceImageBase64 ? (
+              <div
+                className="border-2 border-dashed border-border rounded-lg p-8 text-center cursor-pointer transition-all hover:border-primary hover:bg-primary/5"
+                onClick={() => {
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.accept = 'image/*';
+                  input.onchange = async (e) => {
+                    const file = (e.target as HTMLInputElement).files?.[0];
+                    if (file) {
+                      if (file.size > 5 * 1024 * 1024) {
+                        toast({
+                          title: "File too large",
+                          description: "Please upload an image smaller than 5MB",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
+                      const reader = new FileReader();
+                      reader.onload = () => {
+                        const base64 = reader.result as string;
+                        setReferenceImageBase64(base64);
+                        setReferenceImageName(file.name);
+                      };
+                      reader.readAsDataURL(file);
+                    }
+                  };
+                  input.click();
+                }}
+                data-testid="upload-reference-image"
+              >
+                <Image className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                <p className="font-medium">Click to upload a reference menu image</p>
+                <p className="text-sm text-muted-foreground mt-2">PNG, JPG, or WEBP up to 5MB</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="relative border rounded-lg overflow-hidden bg-muted/20">
+                  <img 
+                    src={referenceImageBase64} 
+                    alt="Reference menu" 
+                    className="w-full max-h-64 object-contain"
+                  />
+                  <Button
+                    variant="destructive"
+                    size="icon"
+                    className="absolute top-2 right-2"
+                    onClick={() => {
+                      setReferenceImageBase64(null);
+                      setReferenceImageName(null);
+                    }}
+                    data-testid="button-remove-reference"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-sm text-muted-foreground text-center">{referenceImageName}</p>
+                
+                <div className="space-y-4 pt-4">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-base font-medium">Similarity Level</Label>
+                    <span className="text-sm font-medium text-primary">
+                      {SIMILARITY_LABELS.find(s => {
+                        const labels = SIMILARITY_LABELS.map(l => l.value);
+                        const closest = labels.reduce((prev, curr) => 
+                          Math.abs(curr - similarityLevel) < Math.abs(prev - similarityLevel) ? curr : prev
+                        );
+                        return s.value === closest;
+                      })?.label}
+                    </span>
+                  </div>
+                  
+                  <div className="px-1">
+                    <Slider
+                      value={[similarityLevel]}
+                      onValueChange={(values) => setSimilarityLevel(values[0])}
+                      min={0}
+                      max={100}
+                      step={25}
+                      className="w-full"
+                      data-testid="slider-similarity"
+                    />
+                  </div>
+                  
+                  <div className="flex justify-between text-xs text-muted-foreground px-1">
+                    <div className="flex items-center gap-1">
+                      <Lightbulb className="h-3 w-3" />
+                      <span>Inspired</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Copy className="h-3 w-3" />
+                      <span>Replica</span>
+                    </div>
+                  </div>
+                  
+                  <p className="text-sm text-muted-foreground text-center">
+                    {SIMILARITY_LABELS.find(s => {
+                      const labels = SIMILARITY_LABELS.map(l => l.value);
+                      const closest = labels.reduce((prev, curr) => 
+                        Math.abs(curr - similarityLevel) < Math.abs(prev - similarityLevel) ? curr : prev
+                      );
+                      return s.value === closest;
+                    })?.description}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         );
 
