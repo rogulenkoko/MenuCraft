@@ -524,10 +524,19 @@ export default function Generate() {
       // Clear saved form state after successful generation
       clearFormState();
       
-      toast({
-        title: "Success",
-        description: "Your menu design is ready!",
-      });
+      // Show warning toast if reference image was skipped
+      if (data.warning) {
+        toast({
+          title: "Generated with Note",
+          description: data.warning,
+          variant: "default",
+        });
+      } else {
+        toast({
+          title: "Success",
+          description: "Your menu design is ready!",
+        });
+      }
       setLocation(`/dashboard/${generation.id}`);
     } catch (error: any) {
       console.error('Generation error:', error);
@@ -935,10 +944,19 @@ export default function Generate() {
                 onClick={() => {
                   const input = document.createElement('input');
                   input.type = 'file';
-                  input.accept = 'image/*';
+                  input.accept = 'image/jpeg,image/png,image/gif,image/webp,.jpg,.jpeg,.png,.gif,.webp';
                   input.onchange = async (e) => {
                     const file = (e.target as HTMLInputElement).files?.[0];
                     if (file) {
+                      const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+                      if (!supportedTypes.includes(file.type)) {
+                        toast({
+                          title: "Unsupported image format",
+                          description: "Please upload a JPG, PNG, GIF, or WebP image",
+                          variant: "destructive",
+                        });
+                        return;
+                      }
                       if (file.size > 5 * 1024 * 1024) {
                         toast({
                           title: "File too large",
@@ -962,7 +980,7 @@ export default function Generate() {
               >
                 <Image className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
                 <p className="font-medium">Click to upload a reference menu image</p>
-                <p className="text-sm text-muted-foreground mt-2">PNG, JPG, or WEBP up to 5MB</p>
+                <p className="text-sm text-muted-foreground mt-2">JPG, PNG, GIF, or WebP up to 5MB</p>
               </div>
             ) : (
               <div className="space-y-4">

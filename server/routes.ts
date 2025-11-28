@@ -925,7 +925,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Missing required fields" });
       }
 
+      // Validate reference image format - if unsupported, we'll skip it and proceed with text-only
+      const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+      let validatedReferenceImage = referenceImage;
+      let referenceImageWarning: string | null = null;
+      
+      if (referenceImage) {
+        const base64Match = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
+        if (base64Match) {
+          let mediaType = base64Match[1];
+          // Normalize common variations
+          if (mediaType === 'image/jpg') {
+            mediaType = 'image/jpeg';
+          }
+          if (!SUPPORTED_IMAGE_TYPES.includes(mediaType)) {
+            console.log(`Unsupported image format: ${mediaType}. Proceeding with text-only generation.`);
+            validatedReferenceImage = null;
+            referenceImageWarning = `Your reference image (${mediaType}) is not supported. We generated your menu without the reference. Supported formats: JPG, PNG, GIF, WebP.`;
+          }
+        } else {
+          console.log('Invalid reference image format. Proceeding with text-only generation.');
+          validatedReferenceImage = null;
+          referenceImageWarning = 'Invalid reference image format. We generated your menu without the reference.';
+        }
+      }
+
       console.log(`Generating menu designs for user: ${req.supabaseUser?.email || req.supabaseUser?.id}${isFreeGeneration ? ' (FREE generation)' : ''}`);
+      if (validatedReferenceImage) {
+        console.log(`Reference image included (similarity: ${similarityLevel || 50}%)`);
+      }
       
       // Only use a credit if this is NOT a free generation
       if (!isFreeGeneration && isPaymentRequired()) {
@@ -956,11 +984,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         fontStyle,
         layout,
         generalDescription,
-        referenceImage,
+        referenceImage: validatedReferenceImage,
         similarityLevel
       });
 
-      res.json({ htmlVariations, generationId });
+      // Include warning if reference image was skipped
+      res.json({ 
+        htmlVariations, 
+        generationId,
+        ...(referenceImageWarning && { warning: referenceImageWarning })
+      });
     } catch (error: any) {
       console.error("Error generating designs:", error);
       
@@ -1244,28 +1277,43 @@ Make it absolutely beautiful and suitable for a real upscale restaurant.`;
     // Build the message content - either with or without reference image
     let messageContent: any;
     
+    // Supported image types for Claude Vision API
+    const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    
     if (referenceImage) {
       // Extract base64 data and media type from data URL
       const base64Match = referenceImage.match(/^data:([^;]+);base64,(.+)$/);
       if (base64Match) {
-        const mediaType = base64Match[1] as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+        let mediaType = base64Match[1];
         const base64Data = base64Match[2];
         
-        messageContent = [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mediaType,
-              data: base64Data,
+        // Normalize common variations
+        if (mediaType === 'image/jpg') {
+          mediaType = 'image/jpeg';
+        }
+        
+        // Check if media type is supported
+        if (SUPPORTED_IMAGE_TYPES.includes(mediaType)) {
+          messageContent = [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mediaType as "image/jpeg" | "image/png" | "image/gif" | "image/webp",
+                data: base64Data,
+              },
             },
-          },
-          {
-            type: "text",
-            text: userPromptText,
-          },
-        ];
-        console.log(`Generating menu with reference image (similarity: ${similarityLevel}%)`);
+            {
+              type: "text",
+              text: userPromptText,
+            },
+          ];
+          console.log(`Generating menu with reference image (similarity: ${similarityLevel}%, type: ${mediaType})`);
+        } else {
+          // Unsupported image format, fall back to text only
+          messageContent = userPromptText;
+          console.log(`Unsupported image format: ${mediaType}. Generating without reference image. Supported formats: ${SUPPORTED_IMAGE_TYPES.join(', ')}`);
+        }
       } else {
         // Invalid base64 format, fall back to text only
         messageContent = userPromptText;
