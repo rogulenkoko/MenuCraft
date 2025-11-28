@@ -1161,11 +1161,11 @@ interface GenerateMenuParams {
 
 // Similarity level descriptions for the AI prompt
 const SIMILARITY_DESCRIPTIONS: Record<number, string> = {
-  0: "Use the reference image purely for creative inspiration. Extract the mood, general aesthetic, and feeling, but create an original design with your own layout and structure.",
-  25: "Create a design loosely inspired by the reference. Borrow general style elements and color sensibilities, but use a different layout and structure.",
-  50: "Create a moderately similar design. Match the general style, typography approach, and visual tone of the reference, while adapting the layout to the menu content.",
-  75: "Create a closely matched design. Replicate the layout structure, typography choices, color usage, and visual hierarchy as closely as possible while adapting to the menu content.",
-  100: "Create a near-replica of the reference design. Match the exact layout, typography, spacing, decorative elements, and visual style as closely as possible.",
+  0: "Use the reference image purely for creative inspiration. Extract the mood, general aesthetic, and feeling, but create an original design with your own layout and structure. Give equal weight to other user-specified parameters (colors, themes, fonts, layout).",
+  25: "Create a design loosely inspired by the reference. Borrow general style elements and color sensibilities, but use a different layout and structure. Other user parameters should still have significant influence on the final design.",
+  50: "Create a moderately similar design. Match the general style, typography approach, and visual tone of the reference. Balance the reference image with other user parameters - both should influence the design equally.",
+  75: "Create a closely matched design. Replicate the layout structure, typography choices, color usage, and visual hierarchy as closely as possible. The reference image should take priority over other user parameters like themes or fonts when they conflict.",
+  100: "Create a near-replica of the reference design. The reference image is the PRIMARY design guide - match the exact layout, typography, spacing, decorative elements, and visual style as closely as possible. IGNORE other user-specified parameters (themes, fonts, colors, layout choices) if they conflict with the reference image. Only use the provided color palette where it can be subtly incorporated without changing the reference design's look.",
 };
 
 // Function to generate a single menu design with Claude
@@ -1233,8 +1233,8 @@ Requirements:
 - Professional, restaurant-quality design
 - Ensure the design looks beautiful when printed as PDF
 
-${restaurantName ? `Restaurant Name: "${restaurantName}" - Display prominently in the header` : ""}
-${slogan ? `Slogan/Tagline: "${slogan}" - Display under the restaurant name` : ""}
+${restaurantName ? `Restaurant Name: "${restaurantName}" - Display prominently in the header` : "IMPORTANT: Do NOT add any restaurant name to the menu. The user has not specified one, so leave the header area for menu sections only."}
+${slogan ? `Slogan/Tagline: "${slogan}" - Display under the restaurant name` : "IMPORTANT: Do NOT add any slogan or tagline. The user has not specified one."}
 ${themeDesc ? `Visual Themes to blend: ${themeDesc}` : ""}
 ${customThemeDescription ? `Custom style elements: ${customThemeDescription}` : ""}
 ${fontDesc ? `Typography Style: ${fontDesc}` : ""}
@@ -1266,7 +1266,7 @@ Create a complete HTML file that:
 1. Opens directly in a browser
 2. Prints beautifully as PDF
 3. Follows the visual theme and style specifications exactly
-4. ${restaurantName ? `Has a professional header with the restaurant name "${restaurantName}"${slogan ? ` and slogan "${slogan}"` : ''}` : 'Has a clean header area'}
+4. ${restaurantName ? `Has a professional header with the restaurant name "${restaurantName}"${slogan ? ` and slogan "${slogan}"` : ''}` : 'Does NOT include any restaurant name or slogan in the header (user did not specify them)'}
 5. Organizes menu items into clear sections
 6. Uses the specified color palette throughout
 7. Applies the typography style consistently

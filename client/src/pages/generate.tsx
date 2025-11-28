@@ -63,9 +63,9 @@ const SIMILARITY_LABELS = [
   { value: 100, label: "Near replica", description: "Match as closely as possible" },
 ];
 
-type WizardStep = "content" | "name" | "slogan" | "theme" | "colors" | "fonts" | "layout" | "size" | "reference" | "description";
+type WizardStep = "content" | "branding" | "reference" | "theme" | "colors" | "fonts" | "layout" | "size" | "description";
 
-const STEPS: WizardStep[] = ["content", "name", "slogan", "theme", "colors", "fonts", "layout", "size", "reference", "description"];
+const STEPS: WizardStep[] = ["content", "branding", "reference", "theme", "colors", "fonts", "layout", "size", "description"];
 
 interface FormState {
   inputMethod: "file" | "text";
@@ -379,11 +379,14 @@ export default function Generate() {
     if (!canSkip()) return;
     
     switch (currentStep) {
-      case "name":
+      case "branding":
         setRestaurantName("");
-        break;
-      case "slogan":
         setSlogan("");
+        break;
+      case "reference":
+        setReferenceImageBase64(null);
+        setReferenceImageName(null);
+        setSimilarityLevel(50);
         break;
       case "theme":
         setSelectedThemes([]);
@@ -400,11 +403,6 @@ export default function Generate() {
         break;
       case "size":
         setSize("a4");
-        break;
-      case "reference":
-        setReferenceImageBase64(null);
-        setReferenceImageName(null);
-        setSimilarityLevel(50);
         break;
       case "description":
         setGeneralDescription("");
@@ -677,33 +675,43 @@ export default function Generate() {
           </div>
         );
 
-      case "name":
+      case "branding":
         return (
-          <div className="space-y-4">
-            <h2 className="text-2xl font-semibold">Restaurant Name</h2>
-            <p className="text-muted-foreground">This will appear prominently on your menu</p>
-            <Input
-              placeholder="e.g., The Golden Fork, Bella Italia, Sakura Garden..."
-              value={restaurantName}
-              onChange={(e) => setRestaurantName(e.target.value)}
-              className="text-lg py-6"
-              data-testid="input-restaurant-name"
-            />
-          </div>
-        );
-
-      case "slogan":
-        return (
-          <div className="space-y-4">
-            <h2 className="text-2xl font-semibold">Slogan or Tagline</h2>
-            <p className="text-muted-foreground">A catchy phrase that represents your restaurant</p>
-            <Input
-              placeholder="e.g., Where Every Meal Tells a Story..."
-              value={slogan}
-              onChange={(e) => setSlogan(e.target.value)}
-              className="text-lg py-6"
-              data-testid="input-slogan"
-            />
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-2xl font-semibold">Restaurant Branding</h2>
+              <p className="text-muted-foreground">Add your restaurant name and tagline (both optional)</p>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="restaurant-name" className="text-base font-medium">Restaurant Name</Label>
+                <Input
+                  id="restaurant-name"
+                  placeholder="e.g., The Golden Fork, Bella Italia, Sakura Garden..."
+                  value={restaurantName}
+                  onChange={(e) => setRestaurantName(e.target.value)}
+                  className="text-lg py-6"
+                  data-testid="input-restaurant-name"
+                />
+              </div>
+              
+              <div className="space-y-2">
+                <Label htmlFor="slogan" className="text-base font-medium">Slogan or Tagline</Label>
+                <Input
+                  id="slogan"
+                  placeholder="e.g., Where Every Meal Tells a Story..."
+                  value={slogan}
+                  onChange={(e) => setSlogan(e.target.value)}
+                  className="text-lg py-6"
+                  data-testid="input-slogan"
+                />
+              </div>
+            </div>
+            
+            <p className="text-sm text-muted-foreground">
+              Leave fields empty if you don't want them on your menu
+            </p>
           </div>
         );
 

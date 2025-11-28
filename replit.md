@@ -63,8 +63,9 @@ Menu Craft is a SaaS application that transforms restaurant menus into stunning,
 
 ## Menu Generation Wizard (9 Steps)
 1. **Content** (required) - Upload PDF/DOCX/TXT or paste menu text
-2. **Restaurant Name** (skippable) - Name displayed on menu header
-3. **Slogan** (skippable) - Tagline under restaurant name
+2. **Branding** (skippable) - Restaurant name and slogan (both optional, if not specified AI won't add them)
+3. **Reference Image** (skippable) - Upload a reference menu image with similarity slider (0-100%)
+   - At maximum similarity, reference image dominates other parameters
 4. **Visual Theme** (skippable) - Select up to 3 themes + custom description
 5. **Color Palette** (skippable) - 5 presets + custom colors option
 6. **Font Style** (skippable) - 5 typography presets
