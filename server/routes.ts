@@ -133,7 +133,7 @@ const anthropic = new Anthropic({
 // Configure multer for file uploads
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 }, // 50MB limit
 });
 
 // Check if payment system is required (can be disabled for development)
